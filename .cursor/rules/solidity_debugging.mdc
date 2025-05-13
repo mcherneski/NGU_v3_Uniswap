@@ -1,0 +1,14 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Local Testing of Solidity Files
+
+**Testing Solidity on Forked Base Mainnet**
+
+When testing Solidity, be sure to fork Base Mainnet and run the tests. Example:
+
+```bash
+forge test --match-path pathToTests/TestFileName.t.sol --fork-url https://base-mainnet.infura.io/v3/94897ae46fe145559d8e5f989b501afb --fork-block-number 29886571 -vvv --via-ir
+```

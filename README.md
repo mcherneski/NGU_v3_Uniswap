@@ -106,3 +106,7 @@ Additional resources:
 
 [v4-by-example](https://v4-by-example.org)
 
+## Run the test on forked Base Mainnet
+```bash
+forge test --match-path test/GlyphHook.t.sol --fork-url https://base-mainnet.infura.io/v3/94897ae46fe145559d8e5f989b501afb --fork-block-number 29886571 -vvv --via-ir
+```
