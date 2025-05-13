@@ -2,7 +2,7 @@
 pragma solidity ^0.8.17;
 
 import {CommonBase} from "forge-std/Base.sol";
-import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
+import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 
 import {Permit2Bytecode} from "./Permit2Bytecode.sol";
 

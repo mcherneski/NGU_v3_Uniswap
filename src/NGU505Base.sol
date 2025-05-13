@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity ^0.8.24;
 
 import {IERC165} from "@openzeppelin/contracts/interfaces/IERC165.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {INGU505Base} from "./interfaces/INGU505Base.sol";
 import {INGU505Events} from "./interfaces/INGU505Events.sol";
 import {NGUBitMask} from "./libraries/Masks.sol";

@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 // Import necessary interfaces and contracts from Uniswap V4 Core
 // Adjust paths based on your dependency installation (e.g., forge install uniswap/v4-core)
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
+import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";

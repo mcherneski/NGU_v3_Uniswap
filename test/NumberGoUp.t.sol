@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test, Vm} from "forge-std/Test.sol";
-import {console2 as console} from "forge-std/console2.sol";
+import {Test, console2 as console} from "forge-std/Test.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {NumberGoUp} from "../src/NumberGoUp.sol";
 import {NGUStaking} from "../src/NGUStaking.sol";

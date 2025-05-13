@@ -16,9 +16,9 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol"; // Library
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol"; // Represents the change in two token balances.
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol"; // Interface this contract must implement to receive callbacks from PoolManager.unlock.
 // --- Uniswap V4 Periphery Imports ---
-import {HookMiner} from "v4-periphery/src/utils/HookMiner.sol"; // Utility to find CREATE2 addresses for hooks.
-import {IV4Router} from "v4-periphery/src/interfaces/IV4Router.sol"; // For ExactInputSingleParams
-import {Actions} from "v4-periphery/src/libraries/Actions.sol"; // For V4_SWAP actions
+import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol"; // Utility to find CREATE2 addresses for hooks.
+import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol"; // For ExactInputSingleParams
+import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol"; // For V4_SWAP actions
 
 // --- Universal Router Imports ---
 import {UniversalRouter} from "@uniswap/universal-router/contracts/UniversalRouter.sol";
@@ -110,8 +110,8 @@ contract GlyphHookTest is Test, IUnlockCallback {
     // Official Addresses (Base Mainnet)
     // PoolManager is already set in setUp from a fixed address
     // address constant POOL_MANAGER_BASE_MAINNET = 0x498581fF718922c3f8e6A244956aF099B2652b2b; // Already used
-    address constant UNIVERSAL_ROUTER_BASE_MAINNET = 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD; // Verify this!
-    address constant PERMIT2_BASE_MAINNET = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+    address payable constant UNIVERSAL_ROUTER_BASE_MAINNET = payable(0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD); // Verify this!
+    IPermit2 constant PERMIT2_BASE_MAINNET = IPermit2(0x000000000022D473030F116dDEE9F6B43aC78BA3); // Common Permit2 address
 
     // --- Setup Function ---
     /**
@@ -136,7 +136,7 @@ contract GlyphHookTest is Test, IUnlockCallback {
 
         // Initialize UniversalRouter and Permit2 instances
         universalRouter = UniversalRouter(UNIVERSAL_ROUTER_BASE_MAINNET);
-        permit2 = IPermit2(PERMIT2_BASE_MAINNET);
+        permit2 = PERMIT2_BASE_MAINNET;
 
         // 2. Deploy FTL Token (ERC-404 Style)
         // Deploys the NumberGoUp token, setting initial parameters and ownership.
@@ -726,86 +726,146 @@ contract GlyphHookTest is Test, IUnlockCallback {
      * @notice Tests that swapping token1 for FTL results in the user receiving FTL
      *         and potentially minting a glyph via the afterSwap hook.
      */
-    function test_MintGlyph_On_ReceiveFTL() public {
+    function test_MintGlyph_On_Receive_FTL() public {
         // Arrange
-        uint256 wethSwapAmount = 10 ether; // User1 will sell 1 WETH (formerly token1SwapAmount)
+        uint256 wethSwapAmount = 10 ether; // User1 will sell 10 WETH
         uint256 initialFTL_ERC20_Balance_User = ftlToken.balanceOf(user1);
         uint256 initialGlyphBalance_User = ftlToken.glyphBalanceOf(user1);
         assertEq(initialGlyphBalance_User, 0, "User should start with 0 glyphs");
         assertEq(initialFTL_ERC20_Balance_User, 0, "User should start with 0 ERC20s");
 
-        // User1 needs to approve this test contract to spend their WETH
-        vm.startPrank(user1);
-        weth.approve(address(this), wethSwapAmount); // Changed from token1
-        vm.stopPrank();
+        // User1 has already approved Permit2 for WETH in setUp,
+        // and Permit2 has approved UniversalRouter for WETH.
 
-        console.log("Test contract calling poolManager.unlock for SWAP using hooked pool (User sells WETH for FTL)...");
+        console.log("Test contract executing swap via UniversalRouter (User sells WETH for FTL)...");
 
-        SwapCallbackParams memory swapCallbackParamsData = SwapCallbackParams({
-            poolKey: poolKey, 
-            swapParams: IPoolManager.SwapParams({
-                zeroForOne: false, // Swapping WETH (currency0, if ordering holds) for FTL (currency1)
-                                   // OR FTL (currency0) for WETH (currency1)
-                                   // This needs to be dynamic based on actual poolKey.currency0/1
-                amountSpecified: -int256(wethSwapAmount), 
-                sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1 // Default, adjust if needed based on actual zeroForOne
-            }),
-            originalSender: user1 
-        });
-        
-        // Dynamically set zeroForOne based on which token is currency0
-        // If WETH is currency0 (token0Addr), and user sells WETH for FTL (currency1), then zeroForOne is TRUE
-        // If FTL is currency0 (token0Addr), and user sells WETH (currency1) for FTL (currency0), then zeroForOne is FALSE
+        // Determine swap direction and price limits
+        bool zeroForOne; // True if selling currency0 for currency1
+        uint160 sqrtPriceLimitX96;
+        Currency currencyIn;
+        Currency currencyOut;
+
         if (Currency.unwrap(poolKey.currency0) == address(weth)) { // WETH is currency0
-            swapCallbackParamsData.swapParams.zeroForOne = true; // Selling WETH (curr0) for FTL (curr1)
-            swapCallbackParamsData.swapParams.sqrtPriceLimitX96 = TickMath.MIN_SQRT_PRICE + 1; // Limit for selling curr0
+            zeroForOne = true; // Selling WETH (curr0) for FTL (curr1)
+            sqrtPriceLimitX96 = TickMath.MIN_SQRT_PRICE + 1; // Limit for selling curr0
+            currencyIn = poolKey.currency0;
+            currencyOut = poolKey.currency1;
             console.log("Swap Direction: User sells WETH (currency0) for FTL (currency1). zeroForOne = true.");
         } else { // FTL is currency0 (WETH is currency1)
-            swapCallbackParamsData.swapParams.zeroForOne = false; // Selling WETH (curr1) for FTL (curr0)
-            swapCallbackParamsData.swapParams.sqrtPriceLimitX96 = TickMath.MAX_SQRT_PRICE - 1; // Limit for selling curr1
+            // This case should have been reverted in setUp if WETH wasn't currency0
+            zeroForOne = false; // Selling WETH (curr1) for FTL (curr0)
+            sqrtPriceLimitX96 = TickMath.MAX_SQRT_PRICE - 1; // Limit for selling curr1
+            currencyIn = poolKey.currency1;
+            currencyOut = poolKey.currency0;
             console.log("Swap Direction: User sells WETH (currency1) for FTL (currency0). zeroForOne = false.");
         }
 
+        // 1. Encode Universal Router Command
+        bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP));
+        bytes[] memory inputs = new bytes[](1);
 
-        bytes memory encodedSwapCallbackParams = abi.encode(swapCallbackParamsData);
-        bytes memory unlockCallData = abi.encode(
-            uint8(ActionType.SWAP), 
-            encodedSwapCallbackParams
+        // 2. Encode V4Router Actions
+        bytes memory actions = abi.encodePacked(
+            uint8(Actions.SWAP_EXACT_IN_SINGLE),
+            uint8(Actions.SETTLE_ALL), // Ensure input tokens are paid by Permit2
+            uint8(Actions.TAKE_ALL)   // Collect output tokens to this contract
         );
 
-        uint256 ftlBalanceBeforeUnlock = ftlToken.balanceOf(address(this)); 
+        // 3. Prepare Parameters for each action
+        bytes[] memory params = new bytes[](3);
+        params[0] = abi.encode(
+            IV4Router.ExactInputSingleParams({
+                poolKey: poolKey, // Use the hooked pool
+                zeroForOne: zeroForOne,
+                amountIn: uint128(wethSwapAmount), // amount of WETH user1 is swapping
+                amountOutMinimum: 0, // We are not testing slippage here primarily
+                hookData: abi.encode(user1) // Pass user1 as recipient for glyphs
+            })
+        );
+        // SETTLE_ALL: Specify input token (WETH) and amount.
+        // Permit2 will handle pulling this from user1.
+        params[1] = abi.encode(Currency.unwrap(currencyIn), wethSwapAmount);
+
+        // TAKE_ALL: Specify output token (FTL) and minimum amount (0 for simplicity).
+        // This contract (address(this)) will receive the FTL.
+        params[2] = abi.encode(Currency.unwrap(currencyOut), 0);
+
+
+        // 4. Combine actions and params into inputs for Universal Router
+        inputs[0] = abi.encode(actions, params);
+
+        // 5. Execute the swap via Universal Router
+        uint256 deadline = block.timestamp + 60; // 1 minute deadline
+
+        uint256 ftlBalanceOfTestContractBeforeSwap = ftlToken.balanceOf(address(this));
         
-        try poolManager.unlock(unlockCallData) returns (bytes memory result) {
-            console.log("Swap unlock call finished successfully.");
-            if (result.length != 0) {
-                console.log("Warning: Swap unlock callback returned non-empty data.");
-            }
+        // The UniversalRouter needs to be called by user1, as user1 is the one whose
+        // tokens are being spent via Permit2.
+        // Or, if this contract is the msg.sender to UniversalRouter, then Permit2 must
+        // allow *this contract* to spend user1's tokens (more complex Permit2 setup).
+        // The simpler way for testing is for user1 to call execute.
+        // However, the current Permit2 approval in setUp is:
+        // user1 -> weth.approve(permit2, amount)
+        // user1 -> permit2.approve(weth, universalRouter, amount, expiration)
+        // This means UniversalRouter can pull WETH from user1 *when user1 is the ultimate beneficiary/initiator*.
+        // If `address(this)` calls `universalRouter.execute`, UR might not have the right context
+        // to use user1's Permit2 allowance unless `msg.sender` for UR matches the Permit2 approver
+        // or a more complex permit is used (e.g. permit on behalf of).
+
+        // For simplicity, we assume `address(this)` can trigger the swap with user1's Permit2 allowance.
+        // The Universal Router's `execute` is payable if ETH is involved in commands, not for V4_SWAP with ERC20s.
+        console.log("Pranking as user1 to call universalRouter.execute...");
+        vm.startPrank(user1);
+        try universalRouter.execute(commands, inputs, deadline) {
+            // Success
+            console.log("UniversalRouter.execute call finished successfully.");
         } catch Error(string memory reason) {
-            console.log(string(abi.encodePacked("Swap unlock call failed (Error): ", reason)));
+            console.log(string(abi.encodePacked("UniversalRouter.execute call failed (Error): ", reason)));
             revert(reason);
         } catch (bytes memory lowLevelData) {
-            console.log("Swap unlock call failed (LowLevel)");
-            // Provide more details on low-level failure if possible.
-            if (lowLevelData.length == 4) {
-                 bytes4 selector = bytes4(lowLevelData);
-                 console.log("LowLevel Revert Selector:", _bytes4ToString(selector));
-                 revert(string(abi.encodePacked("LowLevel revert during swap unlock with selector: ", _bytes4ToString(selector))));
+            console.log("UniversalRouter.execute call failed (LowLevel)");
+            if (lowLevelData.length > 0 && lowLevelData.length <= 68 && lowLevelData[0] == 0x08 && lowLevelData[1] == 0xc3 && lowLevelData[2] == 0x79 && lowLevelData[3] == 0xa0 ) { // Error(string)
+                 string memory revertMsg = abi.decode(lowLevelData[4:], (string));
+                 console.log("LowLevel Revert Message:", revertMsg);
+                 revert(string(abi.encodePacked("LowLevel revert from UR: ", revertMsg)));
+            } else if (lowLevelData.length == 0) {
+                revert("LowLevel revert from UR with no reason string");
             } else {
-                revert("LowLevel revert during swap unlock");
+                console.logBytes(lowLevelData);
+                revert("LowLevel revert from UR with other data");
             }
         }
-        uint256 ftlBalanceAfterUnlock = ftlToken.balanceOf(address(this));
-        uint256 ftlReceivedByTestContract = ftlBalanceAfterUnlock - ftlBalanceBeforeUnlock;
+        vm.stopPrank();
+
+
+        // FTL tokens are received by `address(this)` (the caller of execute)
+        uint256 ftlBalanceOfTestContractAfterSwap = ftlToken.balanceOf(address(this));
+        uint256 ftlReceivedByTestContract = ftlBalanceOfTestContractAfterSwap - ftlBalanceOfTestContractBeforeSwap;
         
+        console.log("FTL received by test contract:", _uintToString(ftlReceivedByTestContract));
+
         if (ftlReceivedByTestContract > 0) {
+            console.log("Transferring FTL from test contract to user1...");
             ftlToken.transfer(user1, ftlReceivedByTestContract);
         }
 
+        // Assertions
         uint256 finalFTL_ERC20_Balance_User = ftlToken.balanceOf(user1);
         uint256 finalGlyphBalance_User = ftlToken.glyphBalanceOf(user1);
-        console.log('Final ERC20 Balance: ', finalFTL_ERC20_Balance_User);
-        console.log('Final Glyph Balance: ', finalGlyphBalance_User);
-        assertTrue(finalFTL_ERC20_Balance_User == initialFTL_ERC20_Balance_User, "User FTL ERC20 balance should increase");
-        assertTrue(finalGlyphBalance_User == 10, "User glyph balance should increase due to hook");
+        console.log("Final FTL ERC20 Balance for user1:", _uintToString(finalFTL_ERC20_Balance_User));
+        console.log("Final Glyph Balance for user1:", _uintToString(finalGlyphBalance_User));
+        
+        assertTrue(finalFTL_ERC20_Balance_User > initialFTL_ERC20_Balance_User, "User FTL ERC20 balance should increase");
+        // The exact glyph amount depends on the swap rate and FTL's `units`.
+        // For this test, we primarily care that *some* glyphs are minted.
+        assertTrue(finalGlyphBalance_User > initialGlyphBalance_User, "User glyph balance should increase due to hook");
+        // A more precise assertion would require calculating expected FTL output and then expected glyphs.
+        // Example: If 10 WETH swaps for exactly 10 FTL (1 FTL = 1 * UNITS), then 10 glyphs should be minted.
+        // For now, checking for any increase is a good first step.
+        console.log("Expected initialGlyphBalance_User:", _uintToString(initialGlyphBalance_User));
+        console.log("Expected finalFTL_ERC20_Balance_User / UNITS :", _uintToString(finalFTL_ERC20_Balance_User / UNITS));
+        assertEq(finalGlyphBalance_User, finalFTL_ERC20_Balance_User / UNITS, "Final glyph balance should match FTL ERC20 balance / units");
+
+
     }
 } 

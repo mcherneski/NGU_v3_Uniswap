@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity ^0.8.24;
 
 import {NGU505Base} from "./NGU505Base.sol";
 import {INGU505Staking} from "./interfaces/INGU505Staking.sol";
@@ -11,6 +11,10 @@ import {INGU505Staking} from "./interfaces/INGU505Staking.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {console} from "forge-std/console.sol";
 import {QueueMetadataLib} from "./libraries/QueueMetadataLib.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title NGU Staking Contract
