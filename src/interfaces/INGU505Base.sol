@@ -116,7 +116,7 @@ interface INGU505Base is IERC165 {
     /// @notice Thrown when attempting to set invalid exemption
     /// @notice  This error occurs when attempting to set invalid transfer exemption status.
     /// Only authorized addresses can manage exemptions.
-    error InvalidExemption();
+    error InvalidExemption(address);
 
     /// @notice Thrown when caller is not authorized
     /// @notice  This error occurs when an unauthorized address attempts a restricted operation.
@@ -195,14 +195,6 @@ interface INGU505Base is IERC165 {
     /// @return Success boolean
     /// @dev This function includes additional checks for safe transfers.
     function safeTransfer(address to, uint256 value) external returns (bool);
-    
-    /// @notice ERC20 transfer from one address to another
-    /// @param from_ The sender address
-    /// @param to_ The recipient address
-    /// @param value_ The amount to transfer
-    /// @return Success boolean
-    /// @dev This function is an alternative implementation of transferFrom for ERC20 functionality.
-    function erc20TransferFrom(address from_, address to_, uint256 value_) external returns (bool);
 
     // ERC721 functions
     /// @notice Get the owner of a specific token

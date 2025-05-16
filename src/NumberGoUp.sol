@@ -6,6 +6,7 @@ import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {NGUStaking} from "./NGUStaking.sol";
 // import {NGU505UniswapV3Exempt} from "./lib/NGU505UniswaV3Exempt.sol";
 import {NGU505Base} from "./NGU505Base.sol";
+import {console2 as console} from "forge-std/console2.sol";
 
 error NotAuthorizedHook();
 
@@ -53,10 +54,13 @@ contract NumberGoUp is Ownable, NGUStaking {
         Ownable(initialOwner_)
     {
         // Set V4 exemptions after roles are initialized
+        console.log("NumberGoUp Constructor: Attempting to set exemption for v4router:", v4router_);
         setIsGlyphTransferExempt(v4router_, true);
+        console.log("NumberGoUp Constructor: Attempting to set exemption for v4PositionManager:", v4PositionManager_);
         setIsGlyphTransferExempt(v4PositionManager_, true);
+        console.log("NumberGoUp Constructor: Attempting to set exemption for v4PoolManager:", v4PoolManager_);
         setIsGlyphTransferExempt(v4PoolManager_, true);
-
+        setIsGlyphTransferExempt(initialMintRecipient_, true);
         // Set initial URI base
         uriBase = "https://ipfs.io/ipfs/bafybeibepdttbmsyq35xlq2wckfdgiqvdqzxqgx5ssvy7g3ba3r5vazwre/";
 
@@ -65,14 +69,6 @@ contract NumberGoUp is Ownable, NGUStaking {
 
         // Grant HOOK_CONFIG_ROLE to the designated owner of this contract
         _grantRole(HOOK_CONFIG_ROLE, initialOwner_);
-    }
-
-    /// @notice Allows the designated GlyphMintingHook (or any address with MINTER_ROLE)
-    /// to mint new tokens.
-    /// @param recipient The address to receive the new tokens.
-    /// @param amount The amount of ERC20 tokens to mint.
-    function mintFromHook(address recipient, uint256 amount) external onlyRole(MINTER_ROLE) {
-        _mintERC20(recipient, amount);
     }
 
     /// @notice Returns the metadata URI for a specific token ID

@@ -36,6 +36,15 @@ contract GlyphMintingHook is BaseHook {
 
     /// @notice Error when the caller is not the Pool Manager
     error OnlyPoolManager();
+    /// @notice Error when hookData is missing or invalid
+    error InvalidHookData();
+    /// @notice Error when this hook is called on a pool that does not contain the NumberGoUpToken
+    error PoolMissingNGUToken();
+
+    error glyphHookOperationError(string reason);
+
+    // Event to signal a failed glyph operation if we choose not to revert the swap
+    event GlyphOperationFailed(address indexed recipient, int256 erc20AmountDelta, string reason);
 
     constructor(IPoolManager _poolManager, address _NumberGoUpToken) BaseHook(_poolManager) {
         NumberGoUpToken = INumberGoUp(_NumberGoUpToken);
@@ -67,8 +76,8 @@ contract GlyphMintingHook is BaseHook {
 
     /**
      * @dev Internal hook function called by the PoolManager after a swap.
-     *      Calculates the FTL token delta for the swap initiator ('sender')
-     *      and calls the FTL token contract to adjust glyph balance.
+     *      Calculates the NGU token delta for the swap initiator ('sender')
+     *      and calls the NGU token contract to adjust glyph balance.
      */
     function _afterSwap(
         address sender, // The msg.sender to the poolManager's swap/donate
@@ -77,59 +86,56 @@ contract GlyphMintingHook is BaseHook {
         BalanceDelta delta, // The resulting balance changes
         bytes calldata hookData // Hook data passed by the caller (should be abi.encode(actualUser))
     ) internal override returns (bytes4 magicByte, int128 hookDelta) { 
-        console.log("GlyphMintingHook._afterSwap entered");
+        // console.log("GlyphMintingHook._afterSwap entered. Sender:", sender); // Debug log
         
         address recipient;
-        if (hookData.length == 32) { // Basic check for a 32-byte ABI-encoded address
+        // hookData is expected to be the ABI encoded address of the glyph recipient.
+        if (hookData.length == 32) {
             recipient = abi.decode(hookData, (address));
         } else {
-            // Fallback or error if hookData is not as expected
-            // For this specific hook, if no user is passed, maybe it defaults to sender or reverts
-            // Defaulting to sender for now, but this should be a conscious design decision
-            recipient = sender; 
-            console.log("Warning: hookData not provided or invalid, defaulting recipient to sender.");
+            // If hookData is not a valid address, revert.
+            // Alternative: could default to `sender` if hookData.length == 0, but explicit is safer.
+            revert InvalidHookData();
         }
+        // console.log("Glyph recipient determined as:", recipient); // Debug log
 
-        // address swapper = sender; // We now use recipient derived from hookData or sender as fallback
+        int256 NGUAmountDelta;
+        address NGUTokenAddress = address(NumberGoUpToken);
 
-        // Determine which delta amount corresponds to the FTL token
-        // IMPORTANT: This assumes you know which currency (0 or 1) is the FTL token
-        int256 ftlAmountDelta;
-        address ftlTokenAddress = address(NumberGoUpToken); // Use the correct token variable
-
-        // THIS LOGIC IS CRUCIAL AND DEPENDS ON YOUR POOL SETUP
-        if (Currency.unwrap(key.currency0) == ftlTokenAddress) {
-            ftlAmountDelta = int256(delta.amount0()); // Correct: call function then cast
-        } else if (Currency.unwrap(key.currency1) == ftlTokenAddress) {
-            ftlAmountDelta = int256(delta.amount1()); // Correct: call function then cast
+        // Determine NGU token delta based on its position (currency0 or currency1) in the PoolKey.
+        if (Currency.unwrap(key.currency0) == NGUTokenAddress) {
+            NGUAmountDelta = int256(delta.amount0()); // NGU is currency0
+        } else if (Currency.unwrap(key.currency1) == NGUTokenAddress) {
+            NGUAmountDelta = int256(delta.amount1()); // NGU is currency1
         } else {
-            // Should not happen if hook is deployed correctly for an FTL pool
-            revert("Hook called on pool without FTL token");
+            // This should not happen if the hook is correctly associated with NGU pools.
+            revert PoolMissingNGUToken();
         }
+        // console.log("NGU amount delta for recipient:", NGUAmountDelta); // Debug log
 
-        // Only proceed if there was a change in the FTL token balance
-        if (ftlAmountDelta != 0) {
-            console.log("GlyphMintingHook._afterSwap: Calling mintOrBurnGlyphForSwap for", recipient);
-            console.log( "with delta", ftlAmountDelta);
-            // Call the NumberGoUp token contract to handle glyph minting/burning based on the swap delta
-            // The NumberGoUp contract itself will calculate the required glyph change based on its internal state and this delta
-            try NumberGoUpToken.mintOrBurnGlyphForSwap(recipient, ftlAmountDelta) { 
-                console.log("GlyphMintingHook._afterSwap: mintOrBurnGlyphForSwap call successful.");
-                // Success
+        if (NGUAmountDelta != 0) {
+            // console.log("Attempting to mint/burn glyphs for", recipient, "with delta", NGUAmountDelta); // Debug log
+            // Attempt to mint/burn glyphs. If this fails, the main swap transaction will still succeed.
+            try NumberGoUpToken.mintOrBurnGlyphForSwap(recipient, NGUAmountDelta) {
+                // Successfully minted/burned glyphs or no action was needed by the token.
+                // console.log("GlyphMintingHook: mintOrBurnGlyphForSwap call successful or no-op by token."); // Optional success log
             } catch Error(string memory reason) {
-                console.log("GlyphMintingHook._afterSwap: mintOrBurnGlyphForSwap call failed:", reason);
-                revert(reason);
-            } catch (bytes memory lowLevelData) {
-                console.logBytes(lowLevelData);
-                revert("GlyphMintingHook: Low-level call to mintOrBurnGlyphForSwap failed");
+                // Glyph mint/burn failed in NumberGoUpToken, but we don't revert the main swap.
+                // Emitting an event here could be useful for off-chain monitoring of failed glyph operations.
+                emit GlyphOperationFailed(recipient, NGUAmountDelta, reason);
+                // console.log("GlyphMintingHook: mintOrBurnGlyphForSwap call failed with reason:", reason); // Debug log - Commented due to linter
+            } catch (bytes memory /*lowLevelData*/) {
+                // Low-level failure during call to NumberGoUpToken, also don't revert the main swap.
+                // console.log("GlyphMintingHook: mintOrBurnGlyphForSwap low-level call failed. Data:"); // Debug log - Commented due to linter
+                // console.log(abi.encode(lowLevelData)); // Temporarily commented out due to linter issues
             }
         } else {
-            console.log("GlyphMintingHook._afterSwap: No FTL token delta, skipping glyph adjustment.");
+            // console.log("No NGU delta for recipient; no glyph action taken."); // Debug log
         }
 
-        magicByte = BaseHook.afterSwap.selector; // Standard success selector for afterSwap
-        hookDelta = 0; // This hook does not request any token delta from the PoolManager
-        // return (magicByte, hookDelta); // This is how it would be if not implicitly returned by naming variables
+        magicByte = BaseHook.afterSwap.selector;
+        hookDelta = 0;
+        return (magicByte, hookDelta); // Explicit return for clarity, though named returns would also work.
     }
 
     // --- Other potential hook functions (implement if needed) ---

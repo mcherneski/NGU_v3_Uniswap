@@ -21,6 +21,10 @@ error InvalidQuantity();
 error InvalidRecipient();
 error BurnAmountExceedsBalance(address account, uint256 quantity, uint256 balance);
 error MintToZeroAddress();
+error InvalidExemption(address account);
+
+// Debugging event
+event DebugInvalidExemptionAttempt(address indexed account, bool value);
 
 /**
  * @title NGU505Base Contract
@@ -44,7 +48,7 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant HOOK_CONFIG_ROLE = keccak256("HOOK_CONFIG_ROLE");
 
-    /// @notice Mapping of addresses exempt from Glyph transfers
+    /// @notice Mapping of addresses exempt from interacting with Glyphs. 
     mapping(address => bool) public isGlyphTransferExempt;
 
     /// @notice Address of the authorized hook contract for special minting
@@ -116,8 +120,8 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
         decimals = decimals_;
         units = units_;
         _maxTotalSupplyERC20 = maxTotalSupplyERC20_ * units_;
-
-        // Only set the exemption here - roles will be granted in the final contract constructor
+        console.log("NGU505Base Constructor: msg.sender is:", msg.sender);
+        console.log("NGU505Base Constructor: initialMintRecipient_ for isGlyphTransferExempt is:", initialMintRecipient_);
         isGlyphTransferExempt[initialMintRecipient_] = true;
 
         // Grant essential roles to the deployer (msg.sender of this base constructor)
@@ -342,13 +346,13 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
             // Action: Only ERC20 transfer. No glyph operations.
             // Glyphs are not minted or burned.
         } else if (isFromExempt && !isToExempt) {
-            // Case 2: Exempt Sender -> Non-Exempt Receiver (e.g., User buys FTL from Pool)
+            // Case 2: Exempt Sender -> Non-Exempt Receiver (e.g., User buys NGU from Pool)
             // Action: Only ERC20 transfer.
             // Glyphs are NOT minted by _transfer; the GlyphMintingHook is responsible for calling
             // a dedicated function like 'mintGlyphFromHook' on NumberGoUp/NumberGoUp.
             // No fractional minting by _transfer either.
         } else if (!isFromExempt && isToExempt) {
-            // Case 3: Non-Exempt Sender -> Exempt Receiver (e.g., User sells FTL to Pool)
+            // Case 3: Non-Exempt Sender -> Exempt Receiver (e.g., User sells NGU to Pool)
             // Action: Burn sender's (from) unstaked glyphs.
             if (nftsInTransferAmount > 0) {
                 _handleNonExemptToExemptTransfer(from, nftsInTransferAmount); // This burns 'nftsInTransferAmount' from 'from'
@@ -720,7 +724,12 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
 
     /// @notice The isGlyphTransferExempt getter is the default public getter. 
     function _setIsGlyphTransferExempt(address account_, bool value_) internal {
-        if (account_ == address(0)) revert InvalidExemption();
+        console.log("NGU505Base: _setIsGlyphTransferExempt called with account:", account_, "and value:", value_); // Log before check
+        if (account_ == address(0)) {
+            console.log("NGU505Base: Reverting due to address(0) in _setIsGlyphTransferExempt for account:", account_);
+            emit DebugInvalidExemptionAttempt(account_, value_); // Emit event before revert
+            revert InvalidExemption(account_);
+        }
         isGlyphTransferExempt[account_] = value_;
     }
 
@@ -734,34 +743,6 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
     /// @return True if the address is an exemption manager
     function isExemptionManager(address account_) external view returns (bool) {
         return hasRole(EXEMPTION_MANAGER_ROLE, account_);
-    }
-
-    function erc20TransferFrom(
-        address from_,
-        address to_,
-        uint256 value_
-    ) external override returns (bool) {
-        // Check for valid addresses
-        if (from_ == address(0) || to_ == address(0)) revert InvalidRecipient();
-        if (value_ == 0) revert InvalidAmount();
-
-        // Add balance check before transfer
-        if (balanceOf[from_] < value_) revert InsufficientBalance(value_, balanceOf[from_]);
-
-        // Check if caller has sufficient allowance
-        if (msg.sender != from_) {
-            uint256 currentAllowance = allowance[from_][msg.sender];
-            if (currentAllowance < value_) {
-                revert InsufficientAllowance(value_, currentAllowance);
-            }
-            // Update allowance
-            allowance[from_][msg.sender] = currentAllowance - value_;
-            
-        }
-
-        // Perform the transfer using existing _transfer function
-        _transfer(from_, to_, value_);
-        return true;
     }
 
     // Helper function to get range info (for debugging and verification)
@@ -1012,39 +993,61 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
      */
     function mintOrBurnGlyphForSwap(address recipient, int256 erc20AmountDelta) external virtual onlyGlyphMintingHook {
         if (recipient == address(0)) revert InvalidRecipient();
+        
+        if (erc20AmountDelta == 0) {
+            // console.log("Zero ERC20 delta, no glyph action taken.");
+            // May want to throw an error here since we shouldn't get 0 as a value.
+            return;
+        }
 
         uint256 currentErc20Balance = balanceOf[recipient];
-        // Use SafeCast or require checks if underflow/overflow is a concern with large deltas
-        uint256 newPotentialErc20Balance;
-        if (erc20AmountDelta >= 0) {
-             newPotentialErc20Balance = currentErc20Balance + uint256(erc20AmountDelta);
-        } else {
-            uint256 deltaAbs = uint256(-erc20AmountDelta);
-            if (deltaAbs > currentErc20Balance) {
-                 newPotentialErc20Balance = 0; // Cannot go below zero
-            } else {
-                 newPotentialErc20Balance = currentErc20Balance - deltaAbs;
+        uint256 erc20BalanceBeforeSwap;
+
+        unchecked {
+            if (erc20AmountDelta > 0) {
+                // currentErc20Balance is balance AFTER delta.
+                // oldBalance = currentErc20Balance - uint(erc20AmountDelta)
+                // This is safe from underflow because if delta > 0, then currentBalance >= delta.
+                erc20BalanceBeforeSwap = currentErc20Balance - uint256(erc20AmountDelta);
+            } else { // erc20AmountDelta < 0
+                // currentErc20Balance is balance AFTER delta.
+                // oldBalance = currentErc20Balance + uint(-erc20AmountDelta)
+                // Addition, overflow is highly unlikely for balances.
+                erc20BalanceBeforeSwap = currentErc20Balance + uint256(-erc20AmountDelta);
             }
         }
 
-        uint256 currentRequiredGlyphs = currentErc20Balance / units;
-        uint256 newRequiredGlyphs = newPotentialErc20Balance / units;
+        uint256 glyphsExpectedAfter = currentErc20Balance / units;
+        uint256 glyphsExpectedBefore = erc20BalanceBeforeSwap / units;
 
-        if (newRequiredGlyphs > currentRequiredGlyphs) {
-            uint256 glyphsToMint = newRequiredGlyphs - currentRequiredGlyphs;
-            console.log("Hook: Minting", glyphsToMint, "glyphs for", recipient);
+        // console.log("Recipient:", recipient);
+        // console.log("ERC20 Delta:", erc20AmountDelta);
+        // console.log("ERC20 Balance Before Swap:", erc20BalanceBeforeSwap);
+        // console.log("ERC20 Balance After Swap (Current):", currentErc20Balance);
+        // console.log("Glyphs Expected Before:", glyphsExpectedBefore);
+        // console.log("Glyphs Expected After:", glyphsExpectedAfter);
+        // console.log("Units per glyph:", units);
+
+        if (glyphsExpectedAfter > glyphsExpectedBefore) {
+            uint256 glyphsToMint;
+            unchecked {
+                glyphsToMint = glyphsExpectedAfter - glyphsExpectedBefore;
+            }
+            // The outer if (glyphsExpectedAfter > glyphsExpectedBefore) ensures glyphsToMint > 0
             _mintGlyph(recipient, glyphsToMint);
-        } else if (newRequiredGlyphs < currentRequiredGlyphs) {
-            uint256 glyphsToBurn = currentRequiredGlyphs - newRequiredGlyphs;
-            console.log("Hook: Burning", glyphsToBurn, "glyphs for", recipient);
-            // Need to get the actual IDs to burn - burning a quantity isn't standard ERC721
-            // This requires fetching the highest IDs owned by the user.
-            // Placeholder: Call internal burn logic which should handle ID selection
-            _burnGlyphQuantity(recipient, glyphsToBurn); // Assumes _burnGlyphQuantity exists and handles ID selection
+            // console.log("Successfully minted glyphs:", glyphsToMint);
+        } else if (glyphsExpectedBefore > glyphsExpectedAfter) {
+            uint256 glyphsToBurn;
+            unchecked {
+                glyphsToBurn = glyphsExpectedBefore - glyphsExpectedAfter;
+            }
+            // The outer if (glyphsExpectedBefore > glyphsExpectedAfter) ensures glyphsToBurn > 0
+            _burnGlyphQuantity(recipient, glyphsToBurn);
+            // console.log("Successfully burned glyphs:", glyphsToBurn);
+        } else {
+            // console.log("No change in whole glyph count needed based on total ERC20 balance.");
         }
-         // else glyphDelta == 0, do nothing
     }
-
 
     // --- Internal Core Logic ---
 

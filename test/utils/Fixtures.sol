@@ -8,7 +8,7 @@ import {PositionManager} from "@uniswap/v4-periphery/src/PositionManager.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
+import {Deployers} from "./DeployAndApproveNGUandWETH.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {DeployPermit2} from "./forks/DeployPermit2.sol";
