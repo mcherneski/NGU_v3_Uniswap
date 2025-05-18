@@ -360,151 +360,29 @@ abstract contract NGUStaking is NGU505Base, INGU505Staking {
      * @param tokenId The ID of the token to unstake
      */
     function _unstakeToken(uint256 tokenId) internal {
-        // Mark as unstaked in glyphData (still size 1 for now)
-        _glyphData[tokenId] = _packTokenData(msg.sender, tokenId, 1, false);
+        // Call _setStackStaked to handle the staked bit and trigger burning logic in NGU505Base
+        _setStackStaked(tokenId, false);
 
-        // --- Merge Logic ---
-        bool merged = false;
-        uint40 prevStartId = 0; uint40 prevSize = 0; uint40 prevRangeId = 0; bool mergePrev = false;
-        uint40 nextStartId = 0; uint40 nextSize = 0; uint40 nextRangeId = 0; bool mergeNext = false;
+        // --- Update staking tracking arrays --- 
+        // (Adapted from original _removeStakedTokenFromArray)
+        uint256 packedIndexData = _stakedTokenIndexes[tokenId];
+        // address owner = _getStakedOwner(packedIndexData); // owner is msg.sender here
+        uint256 indexToRemove = _getStakedIndex(packedIndexData);
 
-        // Check previous token (if tokenId > 0)
-        if (tokenId > 0) {
-            uint256 prevTokenId = tokenId - 1;
-            // Check if prevTokenId is end of an existing unstaked range owned by sender
-             uint256 prevPacked = _glyphData[prevTokenId];
-             if (prevPacked != 0 && NGUBitMask.getOwner(prevPacked) == msg.sender && !NGUBitMask.isStaked(prevPacked)) {
-                  // prevTokenId itself is unstaked, now find which range it belongs to and if it's the *end*
-                  uint40 searchId = _queueMetadata[msg.sender].getHead();
-                  while (searchId != 0) {
-                      StackQueue.TokenRange storage range = _queueRanges[msg.sender][searchId];
-                      if (prevTokenId >= range.startId && prevTokenId < range.startId + range.size) {
-                           // Found the range, check if prevTokenId is the last token
-                           if (range.startId + range.size - 1 == prevTokenId) {
-                                prevRangeId = searchId;
-                                prevStartId = range.startId;
-                                prevSize = range.size;
-                                mergePrev = true;
-                           }
-                           break; // Found the containing range
-                      }
-                      searchId = range.nextId;
-                  }
-             }
-        }
+        uint256[] storage stakedTokensArray = _userStakedTokens[msg.sender];
+        uint256 lastTokenId = stakedTokensArray[stakedTokensArray.length - 1];
 
-        // Check next token
-        uint256 nextTokenId = tokenId + 1;
-        // Check if nextTokenId is the start of an existing unstaked range owned by sender
-        uint256 nextPacked = _glyphData[nextTokenId];
-        if (nextPacked != 0 && NGUBitMask.getOwner(nextPacked) == msg.sender && !NGUBitMask.isStaked(nextPacked)) {
-            // nextTokenId starts a range, find its ID
-            uint40 searchId = _queueMetadata[msg.sender].getHead();
-             while (searchId != 0) {
-                 StackQueue.TokenRange storage range = _queueRanges[msg.sender][searchId];
-                 if (range.startId == nextTokenId) {
-                      nextRangeId = searchId;
-                      nextStartId = range.startId; // == nextTokenId
-                      nextSize = range.size;
-                      mergeNext = true;
-                      break; // Found the range
-                 }
-                 // Optimization: if range.startId > nextTokenId, we won't find it later
-                 if (range.startId > nextTokenId) break;
-                 searchId = range.nextId;
-             }
-        }
-
-
-        // Perform merges
-        if (mergePrev && mergeNext) {
-            // Merge previous, current (tokenId), and next
-            // Absorb current and next into previous range
-            uint40 newMergedSize = prevSize + 1 + nextSize;
-             StackQueue.TokenRange storage prevRangeToUpdate = _queueRanges[msg.sender][prevRangeId]; // Get storage ref
-             uint40 afterNextId = _queueRanges[msg.sender][nextRangeId].nextId; // Get this *before* modifying/deleting nextRangeId
-
-             prevRangeToUpdate.size = newMergedSize; // Update size of prev range
-             prevRangeToUpdate.nextId = afterNextId; // Link prev range directly to the one after next range
-             if (afterNextId != 0) {
-                 _queueRanges[msg.sender][afterNextId].prevId = prevRangeId;
-             }
-
-            // Remove the next range node (and update metadata)
-            _removeQueueRange(msg.sender, nextRangeId);
-
-            // Update metadata tail if next range was the tail (handle inside _removeQueueRange now)
-            // We might still need this if _removeQueueRange doesn't know it was the tail *before* removal
-            // Let's re-check metadata tail after removal
-            uint256 userPackedMeta = _queueMetadata[msg.sender];
-            if (userPackedMeta.getTail() == prevRangeId && afterNextId == 0) { // If prev is now the tail
-                 // Tail is correctly set
-            } else if (userPackedMeta.getTail() == 0 && prevRangeId == 0 && afterNextId == 0) {
-                 // If the list became empty, tail is 0, which is correct
-                 // This case shouldn't happen if prevRangeId exists, but covers edge cases
-            } else if (prevRangeToUpdate.nextId == 0) {
-                 // If the updated prev range is now the last item, set it as tail
-                 _queueMetadata[msg.sender] = userPackedMeta.setTail(prevRangeId);
-            }
-
-            // Update glyphData
-            _glyphData[prevStartId] = _packTokenData(msg.sender, prevStartId, newMergedSize, false);
-            delete _glyphData[nextStartId]; // Clean up glyph data for start of removed 'next' range
-            delete _glyphData[tokenId];    // Clean up glyph data for the single unstaked token
-
-            merged = true;
-        } else if (mergePrev) {
-            // Merge previous and current (tokenId)
-            // Absorb current into previous range
-            uint40 newMergedSize = prevSize + 1;
-            _queueRanges[msg.sender][prevRangeId].size = newMergedSize; // Update size
-
-            // Update glyphData
-            _glyphData[prevStartId] = _packTokenData(msg.sender, prevStartId, newMergedSize, false);
-            delete _glyphData[tokenId]; // Clean up glyph data for the single unstaked token
-
-            merged = true;
-        } else if (mergeNext) {
-            // Merge current (tokenId) and next
-            // Absorb current into next range (update startId and size)
-            uint40 newMergedSize = 1 + nextSize;
-            StackQueue.TokenRange storage nextRange = _queueRanges[msg.sender][nextRangeId];
-            nextRange.startId = uint40(tokenId); // New start ID is the current token
-            nextRange.size = newMergedSize;
-
-            // Update glyphData
-            _glyphData[tokenId] = _packTokenData(msg.sender, tokenId, newMergedSize, false); // Update data for the new start
-            delete _glyphData[nextStartId]; // Clean up glyph data for the original start of the next range
-
-            merged = true;
-        }
-
-        // If no merge happened, add the single token as a new range to the front
-        if (!merged) {
-            // _glyphData[tokenId] is already set to size 1, unstaked
-            // Prepend a new range node
-             _prependQueueRange(msg.sender, uint40(tokenId), 1);
-        }
-
-        // --- Update staked tokens array tracking ---
-        uint256 packedIndex = _stakedTokenIndexes[tokenId];
-        // address indexOwner = _getStakedOwner(packedIndex); // Already validated owner == msg.sender
-        uint256 index = _getStakedIndex(packedIndex);
-
-        uint256[] storage userStakedTokens = _userStakedTokens[msg.sender];
-        uint256 lastIndex = userStakedTokens.length - 1;
-
-        if (index != lastIndex) {
-            uint256 lastTokenId = userStakedTokens[lastIndex];
-            userStakedTokens[index] = lastTokenId;
-
-            // Update the index of the moved token
-            _stakedTokenIndexes[lastTokenId] = _packStakedIndex(msg.sender, index);
-        }
-
-        // Remove the last element and clear the mapping
-        userStakedTokens.pop();
+        // Move the last element to the removed element's place
+        stakedTokensArray[indexToRemove] = lastTokenId;
+        // Update the index of the moved element
+        _stakedTokenIndexes[lastTokenId] = _packStakedIndex(msg.sender, indexToRemove);
+        
+        // Remove the last element
+        stakedTokensArray.pop();
+        // Clear the index for the removed token ID
         delete _stakedTokenIndexes[tokenId];
+
+        // The complex queue manipulation and merging logic is no longer needed as the glyph is burned.
     }
 
     /**

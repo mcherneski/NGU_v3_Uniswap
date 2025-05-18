@@ -67,7 +67,7 @@ contract Deployers is Test {
     PoolNestedActionsTest nestedActionRouter;
     address feeController;
 
-    PoolKey key;
+    PoolKey deployersKey;
     PoolKey nativeKey;
     PoolKey uninitializedKey;
     PoolKey uninitializedNativeKey;
@@ -276,11 +276,11 @@ contract Deployers is Test {
         deployFreshManagerAndRouters();
         // sets the global currencies and key
         deployMintAndApprove2Currencies();
-        (key,) = initPoolAndAddLiquidity(currency0, currency1, hooks, 3000, SQRT_PRICE_1_1);
-        nestedActionRouter.executor().setKey(key);
+        (deployersKey,) = initPoolAndAddLiquidity(currency0, currency1, hooks, 3000, SQRT_PRICE_1_1);
+        nestedActionRouter.executor().setKey(deployersKey);
         (nativeKey,) =
             initPoolAndAddLiquidityETH(CurrencyLibrary.ADDRESS_ZERO, currency1, hooks, 3000, SQRT_PRICE_1_1, 1 ether);
-        uninitializedKey = key;
+        uninitializedKey = deployersKey;
         uninitializedNativeKey = nativeKey;
         uninitializedKey.fee = 100;
         uninitializedNativeKey.fee = 100;

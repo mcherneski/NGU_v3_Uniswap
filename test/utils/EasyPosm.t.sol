@@ -23,6 +23,8 @@ contract CounterTest is Test, Fixtures {
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
+    PoolKey key;
+
     int24 tickLower;
     int24 tickUpper;
 

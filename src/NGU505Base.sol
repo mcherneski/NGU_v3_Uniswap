@@ -12,7 +12,7 @@ import {StackQueue} from "./libraries/StackQueue.sol";
 import {QueueMetadataLib} from "./libraries/QueueMetadataLib.sol";
 import {IERC20Events} from "./interfaces/IERC20Events.sol";
 import {IGlyphEvents} from "./interfaces/IGlyphEvents.sol";
-import {console2 as console} from "forge-std/console2.sol";
+// import {console2 as console} from "forge-std/console2.sol"; // Keep logs commented
 
 // Custom Errors
 error InvalidAddress();
@@ -120,16 +120,19 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
         decimals = decimals_;
         units = units_;
         _maxTotalSupplyERC20 = maxTotalSupplyERC20_ * units_;
-        console.log("NGU505Base Constructor: msg.sender is:", msg.sender);
-        console.log("NGU505Base Constructor: initialMintRecipient_ for isGlyphTransferExempt is:", initialMintRecipient_);
+        // console.log("NGU505Base Constructor: msg.sender is:", msg.sender);
+        // console.log("NGU505Base Constructor: initialMintRecipient_ for isGlyphTransferExempt is:", initialMintRecipient_);
         isGlyphTransferExempt[initialMintRecipient_] = true;
 
-        // Grant essential roles to the deployer (msg.sender of this base constructor)
-        // This assumes the deployer will also be the initialOwner in the final contract.
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender); // Grant admin to deployer
         _grantRole(EXEMPTION_MANAGER_ROLE, msg.sender);
         _grantRole(BURNER_ROLE, msg.sender);
-        _grantRole(BURNER_ROLE, initialMintRecipient_); // Also grant burner to initial recipient if intended
+        _grantRole(MINTER_ROLE, msg.sender); // Add MINTER_ROLE for deployer
         _grantRole(HOOK_CONFIG_ROLE, msg.sender);
+        
+        if (initialMintRecipient_ != msg.sender) { // If deployer is not also initial recipient
+             _grantRole(BURNER_ROLE, initialMintRecipient_);
+        }
     }
     
     function glyphBalanceOf(address owner_) public view returns (uint256) {
@@ -250,13 +253,40 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
         address owner = NGUBitMask.getOwner(packed);
         uint256 stackSize = NGUBitMask.getStackSize(packed);
         
-        // Update the token data with new staked status
-        _glyphData[startTokenId] = _packTokenData(
-            owner,
-            startTokenId,
-            stackSize,
-            isStaked
-        );
+        if (!isStaked) {
+            // Unstaking: Burn the glyph(s) in this stack.
+            // The original _glyphData update for staked=false is now handled by the burn.
+            _burnGlyphStackOnUnstake(owner, startTokenId, stackSize);
+        } else {
+            // Staking: Update the token data with new staked status true.
+            // This implies the glyph was previously not considered staked by this contract's flag.
+            // If it was in a queue, an external mechanism should have removed it.
+            _glyphData[startTokenId] = _packTokenData(
+                owner,
+                startTokenId,
+                stackSize,
+                true // isStaked is true here
+            );
+        }
+    }
+
+    // Helper function to burn a glyph stack when it's unstaked
+    function _burnGlyphStackOnUnstake(address owner, uint256 startId, uint256 stackSize) internal {
+        // Ensure there's actual data to burn; an already zeroed entry means it's gone or never existed.
+        if (_glyphData[startId] == 0) revert GlyphNotFound(); 
+        // It's important that stackSize correctly reflects the number of glyphs in this entry.
+        if (stackSize == 0) revert InvalidQuantity(); // Cannot burn zero glyphs.
+
+        // Check if owner's balance is sufficient, though for burning a specific stack,
+        // the existence of _glyphData[startId] owned by 'owner' should imply this.
+        // However, a direct balance check is safer.
+        if (_glyphBalance[owner] < stackSize) revert InsufficientBalance(stackSize, _glyphBalance[owner]);
+
+        _glyphBalance[owner] -= stackSize;
+        _burnedTokens += stackSize;
+        delete _glyphData[startId]; // Clear the data for this stack
+
+        emit IGlyphEvents.BatchBurn(owner, uint40(startId), uint40(stackSize));
     }
     
     /// @notice Sets the allowance granted to `spender` by the caller
@@ -325,64 +355,44 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
         address from,
         address to,
         uint256 amount
-    ) internal {
-        // Add balance check before proceeding with transfer
+    ) internal virtual {
+        if (from == address(0)) revert InvalidAddress();
+        if (to == address(0)) revert InvalidAddress();
         if (balanceOf[from] < amount) revert InsufficientBalance(amount, balanceOf[from]);
 
         bool isFromExempt = isGlyphTransferExempt[from];
         bool isToExempt = isGlyphTransferExempt[to];
-        
-        // Calculate whole tokens represented by the 'amount' being transferred
-        uint256 nftsInTransferAmount = amount / units;
 
-        // Calculate sender's whole token balance before and after this specific transfer amount is deducted
-        uint256 fromWholeTokensBefore = balanceOf[from] / units;
-        uint256 fromBalanceAfterHypothetical = balanceOf[from] - amount; // to avoid underflow if amount > balance (already checked)
-        uint256 fromWholeTokensAfter = fromBalanceAfterHypothetical / units;
+        // uint256 nftsInTransferAmount = amount / units; // Unused variable
+        // uint256 fromWholeTokensBefore = balanceOf[from] / units; // Unused variable
+        // Store pre-transfer balances for fractional logic
+        // uint256 fromBalanceBefore = balanceOf[from]; // Unused variable
+        // uint256 toBalanceBefore = balanceOf[to]; // Unused variable
 
-
-        if (isFromExempt && isToExempt) {
-            // Case 1: Exempt Sender -> Exempt Receiver
-            // Action: Only ERC20 transfer. No glyph operations.
-            // Glyphs are not minted or burned.
-        } else if (isFromExempt && !isToExempt) {
-            // Case 2: Exempt Sender -> Non-Exempt Receiver (e.g., User buys NGU from Pool)
-            // Action: Only ERC20 transfer.
-            // Glyphs are NOT minted by _transfer; the GlyphMintingHook is responsible for calling
-            // a dedicated function like 'mintGlyphFromHook' on NumberGoUp/NumberGoUp.
-            // No fractional minting by _transfer either.
-        } else if (!isFromExempt && isToExempt) {
-            // Case 3: Non-Exempt Sender -> Exempt Receiver (e.g., User sells NGU to Pool)
-            // Action: Burn sender's (from) unstaked glyphs.
-            if (nftsInTransferAmount > 0) {
-                _handleNonExemptToExemptTransfer(from, nftsInTransferAmount); // This burns 'nftsInTransferAmount' from 'from'
-            }
-            // Handle fractional burn for the sender if their total ERC20 balance drops across a 'units' threshold
-            // beyond the nftsInTransferAmount directly accounted for.
-            if (fromWholeTokensBefore > fromWholeTokensAfter && (fromWholeTokensBefore - fromWholeTokensAfter > nftsInTransferAmount)) {
-                bool burnSuccess = _handleFractionalChanges(from, true); // true for burn
-                require(burnSuccess, "Fractional burn failed for sender to exempt");
-            }
-        } else { // Case 4: Non-Exempt Sender -> Non-Exempt Receiver (P2P Transfer)
-            // Action: Burn sender's (from) unstaked glyphs. No glyph minting for receiver (to).
-            if (nftsInTransferAmount > 0) {
-                // Reuse burn logic: conceptually, sender is "sending away" glyphs which get burned.
-                _handleNonExemptToExemptTransfer(from, nftsInTransferAmount); 
-            }
-            // Handle fractional burn for the sender if their total ERC20 balance drops across a 'units' threshold.
-            if (fromWholeTokensBefore > fromWholeTokensAfter && (fromWholeTokensBefore - fromWholeTokensAfter > nftsInTransferAmount)) {
-                bool burnSuccess = _handleFractionalChanges(from, true); // true for burn
-                require(burnSuccess, "Fractional burn failed for sender P2P");
-            }
-            // NO MINTING for 'to'. Glyphs are only acquired from the pool hook.
-            // NO fractional mint for 'to'.
-        }
-
-        // --- Final ERC20 Balance Update ---
+        // --- Update ERC20 Balances First ---
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
-
         emit IERC20Events.Transfer(from, to, amount);
+        // --- ERC20 Balances Updated ---
+
+        if (isFromExempt && isToExempt) {
+            // Case 1: Exempt Sender -> Exempt Receiver. No glyph action.
+            // // console.log("Transfer Case 1: Exempt -> Exempt. No glyph action.");
+        } else if (isFromExempt && !isToExempt) {
+            // Case 2: Exempt Sender -> Non-Exempt Receiver.
+            // NO glyph action here. Glyphs are only minted via the hook.
+            // // console.log("Transfer Case 2: Exempt -> Non-Exempt. No direct glyph action.");
+            // _handleFractionalChanges(to, false); // REMOVED
+        } else if (!isFromExempt && isToExempt) {
+            // Case 3: Non-Exempt Sender -> Exempt Receiver.
+            // NO glyph action here. Glyphs are only affected by hook or direct burn calls.
+            // // console.log("Transfer Case 3: Non-Exempt -> Exempt. No direct glyph action.");
+            // _handleFractionalChanges(from, true); // REMOVED
+        } else { // Case 4: Non-Exempt Sender -> Non-Exempt Receiver (P2P)
+            // NO glyph action here. Glyphs are only affected by hook or direct burn calls.
+            // // console.log("Transfer Case 4: Non-Exempt -> Non-Exempt. No direct glyph action.");
+            // _handleFractionalChanges(from, true); // REMOVED
+        }
     }
 
     function _handleNonExemptToExemptTransfer(
@@ -724,9 +734,9 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
 
     /// @notice The isGlyphTransferExempt getter is the default public getter. 
     function _setIsGlyphTransferExempt(address account_, bool value_) internal {
-        console.log("NGU505Base: _setIsGlyphTransferExempt called with account:", account_, "and value:", value_); // Log before check
+        // console.log("NGU505Base: _setIsGlyphTransferExempt called with account:", account_, "and value:", value_); // Log before check
         if (account_ == address(0)) {
-            console.log("NGU505Base: Reverting due to address(0) in _setIsGlyphTransferExempt for account:", account_);
+            // console.log("NGU505Base: Reverting due to address(0) in _setIsGlyphTransferExempt for account:", account_);
             emit DebugInvalidExemptionAttempt(account_, value_); // Emit event before revert
             revert InvalidExemption(account_);
         }
@@ -787,29 +797,28 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
     }
 
     /**
-     * @notice Internal function to pack token data
-     * @dev Critical for staking operations:
-     * - Called when updating token state during stake/unstake
-     * - Ensures consistent data format
-     * - Validates data before storage
-     * 
-     * @param owner The owner address
-     * @param startId The starting token ID
-     * @param rangeSize The size of the token range
-     * @param isStaked Whether the tokens are staked
-     * @return The packed token data
+     * @notice Packs token data into a uint256 for efficient storage.
+     * @param owner The address of the token owner.
+     * @param startId The starting ID of the token range.
+     * @param stackSize The number of tokens in the range.
+     * @param isTokenStaked Boolean indicating if the token range is staked.
+     * @return packed The packed token data.
      */
-    function _packTokenData(
-        address owner,
-        uint256 startId,
-        uint256 rangeSize,
-        bool isStaked
-    ) internal pure returns (uint256) {
-        if (owner == address(0)) revert InvalidOwner();
-        if (startId > (1 << 63) - 1) revert InvalidStartId(); // Max 63-bit integer (9.2 quintillion tokens)
-        if (rangeSize > type(uint32).max) revert InvalidRangeSize();
-        
-        return NGUBitMask.packTokenData(owner, startId, rangeSize, isStaked);
+    function _packTokenData(address owner, uint256 startId, uint256 stackSize, bool isTokenStaked) internal pure returns (uint256 packed) {
+        // Constants should match those in NGUBitMask.sol or be defined here if used directly often
+        uint256 BITMASK_START_ID_BITS_LOCAL = (1 << 63) - 1; 
+        uint256 BITMASK_STACK_SIZE_BITS_LOCAL = (1 << 32) - 1;
+        uint256 BITMASK_STAKED_FLAG_LOCAL = uint256(1) << 255;
+
+        require(owner != address(0), "Owner cannot be zero address");
+        require(startId <= BITMASK_START_ID_BITS_LOCAL, "Start ID too large");
+        require(stackSize <= BITMASK_STACK_SIZE_BITS_LOCAL, "Stack size too large");
+
+        packed = uint256(uint160(owner)) |
+                (startId << 160) |
+                (stackSize << 223) | // Shift for stack size from NGUBitMask
+                (isTokenStaked ? BITMASK_STAKED_FLAG_LOCAL : 0);
+        return packed;
     }
 
     /**
@@ -976,6 +985,7 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
 
     /// @notice Modifier to ensure only the designated GlyphMintingHook can call a function
     modifier onlyGlyphMintingHook() {
+        // console.log("onlyGlyphMintingHook: msg.sender is", msg.sender, "glyphMintingHookAddress is", glyphMintingHookAddress);
         if (msg.sender != glyphMintingHookAddress) {
             revert NotAuthorizedHook();
         }
@@ -996,53 +1006,63 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
         
         if (erc20AmountDelta == 0) {
             // console.log("Zero ERC20 delta, no glyph action taken.");
-            // May want to throw an error here since we shouldn't get 0 as a value.
             return;
         }
 
-        uint256 currentErc20Balance = balanceOf[recipient];
-        uint256 erc20BalanceBeforeSwap;
+        uint256 balanceBeforeDelta = balanceOf[recipient]; // Recipient's NGU balance BEFORE this swap's delta.
+        uint256 balanceAfterDelta;
 
-        unchecked {
-            if (erc20AmountDelta > 0) {
-                // currentErc20Balance is balance AFTER delta.
-                // oldBalance = currentErc20Balance - uint(erc20AmountDelta)
-                // This is safe from underflow because if delta > 0, then currentBalance >= delta.
-                erc20BalanceBeforeSwap = currentErc20Balance - uint256(erc20AmountDelta);
-            } else { // erc20AmountDelta < 0
-                // currentErc20Balance is balance AFTER delta.
-                // oldBalance = currentErc20Balance + uint(-erc20AmountDelta)
-                // Addition, overflow is highly unlikely for balances.
-                erc20BalanceBeforeSwap = currentErc20Balance + uint256(-erc20AmountDelta);
+        if (erc20AmountDelta > 0) {
+            // Recipient is receiving tokens.
+            // This is safe from overflow unless total supply is near max uint256, very unlikely for balances.
+            balanceAfterDelta = balanceBeforeDelta + uint256(erc20AmountDelta);
+        } else { // erc20AmountDelta < 0
+            // Recipient is sending tokens.
+            uint256 amountSent = uint256(-erc20AmountDelta);
+            // The main swap logic should ensure `balanceBeforeDelta >= amountSent`.
+            // If not, the transaction would likely have failed before reaching the hook,
+            // or this indicates an issue with how deltas are passed or accounted for.
+            // For robustness, ensure no underflow if an unexpected state occurs.
+            if (balanceBeforeDelta < amountSent) {
+                // This case implies an inconsistency; either the user didn't have enough (should have reverted earlier)
+                // or the delta calculation is problematic for the hook's perspective.
+                // Setting balanceAfterDelta to 0 is a conservative approach for glyph calculation here.
+                // Alternatively, consider reverting if this state is deemed impossible/critical.
+                balanceAfterDelta = 0;
+            } else {
+                balanceAfterDelta = balanceBeforeDelta - amountSent;
             }
         }
 
-        uint256 glyphsExpectedAfter = currentErc20Balance / units;
-        uint256 glyphsExpectedBefore = erc20BalanceBeforeSwap / units;
+        uint256 glyphsBefore = balanceBeforeDelta / units; // Use the state variable 'units'
+        uint256 glyphsAfter = balanceAfterDelta / units;   // Use the state variable 'units'
 
         // console.log("Recipient:", recipient);
         // console.log("ERC20 Delta:", erc20AmountDelta);
-        // console.log("ERC20 Balance Before Swap:", erc20BalanceBeforeSwap);
-        // console.log("ERC20 Balance After Swap (Current):", currentErc20Balance);
-        // console.log("Glyphs Expected Before:", glyphsExpectedBefore);
-        // console.log("Glyphs Expected After:", glyphsExpectedAfter);
-        // console.log("Units per glyph:", units);
+        // console.log("Balance Before Delta:", balanceBeforeDelta);
+        // console.log("Balance After Delta:", balanceAfterDelta);
+        // console.log("Glyphs Before (using this.units):", glyphsBefore);
+        // console.log("Glyphs After (using this.units):", glyphsAfter);
+        // console.log("Hook using units value:", units);
 
-        if (glyphsExpectedAfter > glyphsExpectedBefore) {
+
+        if (glyphsAfter > glyphsBefore) {
             uint256 glyphsToMint;
             unchecked {
-                glyphsToMint = glyphsExpectedAfter - glyphsExpectedBefore;
+                glyphsToMint = glyphsAfter - glyphsBefore;
             }
-            // The outer if (glyphsExpectedAfter > glyphsExpectedBefore) ensures glyphsToMint > 0
-            _mintGlyph(recipient, glyphsToMint);
+            if (glyphsToMint > 0) { // Ensure we only call _mintGlyph if there's something to mint
+                _mintGlyph(recipient, glyphsToMint);
+            }
             // console.log("Successfully minted glyphs:", glyphsToMint);
-        } else if (glyphsExpectedBefore > glyphsExpectedAfter) {
+        } else if (glyphsBefore > glyphsAfter) {
             uint256 glyphsToBurn;
             unchecked {
-                glyphsToBurn = glyphsExpectedBefore - glyphsExpectedAfter;
+                glyphsToBurn = glyphsBefore - glyphsAfter;
             }
-            // The outer if (glyphsExpectedBefore > glyphsExpectedAfter) ensures glyphsToBurn > 0
-            _burnGlyphQuantity(recipient, glyphsToBurn);
+            if (glyphsToBurn > 0) { // Ensure we only call _burnGlyphQuantity if there's something to burn
+                _burnGlyphQuantity(recipient, glyphsToBurn);
+            }
             // console.log("Successfully burned glyphs:", glyphsToBurn);
         } else {
             // console.log("No change in whole glyph count needed based on total ERC20 balance.");
@@ -1060,30 +1080,58 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
      */
      function _burnGlyphQuantity(address from, uint256 quantity) internal virtual {
         uint256 ownedCount = _glyphBalance[from];
-        if (quantity == 0) return; // Nothing to burn
+        if (quantity == 0) return;
         if (quantity > ownedCount) revert BurnAmountExceedsBalance(from, quantity, ownedCount);
 
         uint256 burnedSoFar = 0;
-        while (burnedSoFar < quantity) {
-            uint256 remainingToBurn = quantity - burnedSoFar;
-            if (_queueMetadata[from].getSize() == 0) {
-                // This should ideally not be reached if ownedCount check was accurate
-                // and _glyphBalance is consistent with _queueMetadata.
-                revert GlyphNotFound(); // Or some other appropriate error
-            }
+        // Iterate from the HEAD of the queue (lowest IDs first for burning)
+        uint40 currentRangeId = _queueMetadata[from].getHead();
 
-            uint40 headRangeId = _queueMetadata[from].getHead();
-            if (headRangeId == 0) { // Should also not be reached if getSize > 0
-                 revert GlyphNotFound();
-            }
-            StackQueue.TokenRange storage headRange = _queueRanges[from][headRangeId];
+        while (burnedSoFar < quantity && currentRangeId != 0) {
+            StackQueue.TokenRange storage currentRange = _queueRanges[from][currentRangeId];
+            uint256 remainingToBurnOuter = quantity - burnedSoFar;
             
-            uint256 burnInThisRange = remainingToBurn;
-            if (burnInThisRange > headRange.size) {
-                burnInThisRange = headRange.size;
+            uint40 burnInThisRange = uint40(remainingToBurnOuter);
+            if (burnInThisRange > currentRange.size) {
+                burnInThisRange = currentRange.size;
             }
 
-            _burnTokenRange(from, headRangeId, uint40(burnInThisRange));
+            // Actual burning of tokens and modification of this range
+            // For simplicity, this placeholder will just adjust numbers.
+            // A real implementation needs to emit Transfer to address(0) for each token ID.
+            
+            uint256 actualStartIdToBurn = currentRange.startId; // This is uint40
+            for (uint256 i = 0; i < burnInThisRange; ++i) {
+                // Placeholder: In a real ERC721, you'd clear approvals & emit Transfer.
+                // Here, we just account for it. The actual token ID is actualStartIdToBurn + i.
+                // emit Transfer(from, address(0), actualStartIdToBurn + i); // Example
+            }
+
+            if (burnInThisRange == currentRange.size) {
+                // Entire range is burned, remove it from queue
+                uint40 nextId = currentRange.nextId;
+                uint40 prevId = currentRange.prevId;
+                if (prevId != 0) _queueRanges[from][prevId].nextId = nextId; else _queueMetadata[from] = _queueMetadata[from].setHead(nextId);
+                if (nextId != 0) _queueRanges[from][nextId].prevId = prevId; else _queueMetadata[from] = _queueMetadata[from].setTail(prevId);
+                delete _queueRanges[from][currentRangeId];
+                 _queueMetadata[from] = _queueMetadata[from].decrementSize();
+                currentRangeId = nextId; // Move to next range
+            } else {
+                // Partial range burn (from the start of this range)
+                currentRange.startId += burnInThisRange;
+                currentRange.size -= burnInThisRange;
+                // currentRangeId remains the same, it's just smaller
+            }
+            
+            delete _glyphData[actualStartIdToBurn]; // Delete original packed data for this range start
+
+            if (currentRange.size > 0) { // If range still exists, update its packed data
+                 _glyphData[currentRange.startId] = _packTokenData(from, currentRange.startId, currentRange.size, NGUBitMask.isStaked(_glyphData[currentRange.startId]));
+            }
+
+
+            _glyphBalance[from] -= burnInThisRange;
+            _burnedTokens += burnInThisRange;
             burnedSoFar += burnInThisRange;
         }
     }
@@ -1093,53 +1141,78 @@ abstract contract NGU505Base is INGU505Base, ReentrancyGuard, AccessControl, ING
      * @dev Finds the next available token IDs and mints them.
      */
     function _mintGlyph(address to, uint256 quantity) internal virtual {
+        // This is a simplified version of _mintGlyphsBatch for a single new range.
+        // It's called by mintOrBurnGlyphForSwap.
         if (to == address(0)) revert InvalidRecipient();
+        if (quantity == 0) return; // Nothing to mint
         
-        uint256 startTokenId = currentTokenId;        
-        
-        // Pack data and store for the range
-        _glyphData[startTokenId] = _packTokenData(
-            to,
-            startTokenId,
-            quantity,
-            false // Not staked
-        );
-        
-        currentTokenId = startTokenId + quantity;
-        _glyphBalance[to] += quantity;
+        uint256 newGlyphRangeStartId = currentTokenId;
+        currentTokenId += quantity;
 
-        // Initialize queue if it hasn't been used before
-        uint256 packedMeta = _queueMetadata[to];
-        if (packedMeta == 0) {
-            packedMeta = QueueMetadataLib.pack(0, 0, 0, 1);
-        }
+        // Queue Management for _mintGlyph (simplified append)
+        uint256 packedUserMeta = _queueMetadata[to];
+        uint40 userHead = packedUserMeta.getHead();
+        uint40 userTail = packedUserMeta.getTail();
+        uint40 userNextRangeId = packedUserMeta.getNextRangeId();
+        uint40 userQueueSize = packedUserMeta.getSize();
 
-        // Add to user's queue - append logic
-        uint40 newRangeId;
-        uint256 nextPackedMeta;
-        (newRangeId, nextPackedMeta) = packedMeta.incrementNextRangeId();
-        uint40 currentTailId = packedMeta.getTail();
+        if (userNextRangeId == 0) userNextRangeId = 1;
 
-        // Create and store the new range
-        StackQueue.TokenRange storage newRange = _queueRanges[to][newRangeId];
-        newRange.startId = uint40(startTokenId);
-        newRange.size = uint40(quantity);
+        StackQueue.TokenRange storage newRange = _queueRanges[to][userNextRangeId];
+        newRange.startId = uint40(newGlyphRangeStartId);
+        newRange.size = uint32(quantity); // Assumes quantity fits uint32 for a single mint op
         newRange.owner = to;
-        newRange.prevId = currentTailId;
+        newRange.prevId = userTail;
         newRange.nextId = 0;
 
-        // Update links and metadata
-        if (currentTailId != 0) {
-            _queueRanges[to][currentTailId].nextId = newRangeId;
+        if (userTail != 0) {
+            _queueRanges[to][userTail].nextId = userNextRangeId;
         } else {
-            nextPackedMeta = nextPackedMeta.setHead(newRangeId);
+            userHead = userNextRangeId;
         }
-        nextPackedMeta = nextPackedMeta.setTail(newRangeId);
-        nextPackedMeta = nextPackedMeta.incrementSize();
+        userTail = userNextRangeId;
+        _queueMetadata[to] = QueueMetadataLib.pack(userHead, userTail, userNextRangeId + 1, userQueueSize + 1);
 
-        _queueMetadata[to] = nextPackedMeta;
+        _glyphBalance[to] += quantity;
+        _glyphData[newGlyphRangeStartId] = _packTokenData(to, newGlyphRangeStartId, quantity, false);
 
-        // Emit a single batch mint event instead of multiple individual events
-        emit BatchMint(to, startTokenId, quantity);
+        emit BatchMint(to, newGlyphRangeStartId, quantity); // Use BatchMint for consistency
+    }
+
+    function _mintGlyphsBatch(address to_, uint256 quantity_) internal {
+        if (to_ == address(0)) revert InvalidRecipient();
+        if (quantity_ == 0) return;
+
+        uint256 newGlyphRangeStartId = currentTokenId; 
+        currentTokenId += quantity_;
+
+        uint256 packedUserMeta = _queueMetadata[to_];
+        uint40 userHead = packedUserMeta.getHead();
+        uint40 userTail = packedUserMeta.getTail();
+        uint40 userNextRangeId = packedUserMeta.getNextRangeId(); 
+        uint40 userQueueSize = packedUserMeta.getSize();
+
+        if (userNextRangeId == 0) userNextRangeId = 1;
+
+        StackQueue.TokenRange storage newRange = _queueRanges[to_][userNextRangeId];
+        newRange.startId = uint40(newGlyphRangeStartId); 
+        newRange.size = uint32(quantity_); 
+        newRange.owner = to_;
+        newRange.prevId = userTail; 
+        newRange.nextId = 0; 
+
+        if (userTail != 0) {
+            _queueRanges[to_][userTail].nextId = userNextRangeId;
+        } else {
+            userHead = userNextRangeId;
+        }
+        userTail = userNextRangeId; 
+
+        _queueMetadata[to_] = QueueMetadataLib.pack(userHead, userTail, userNextRangeId + 1, userQueueSize + 1);
+        
+        _glyphBalance[to_] += quantity_;
+        _glyphData[newGlyphRangeStartId] = _packTokenData(to_, newGlyphRangeStartId, quantity_, false);
+
+        emit BatchMint(to_, newGlyphRangeStartId, quantity_);
     }
 } 

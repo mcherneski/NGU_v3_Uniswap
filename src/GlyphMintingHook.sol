@@ -80,14 +80,13 @@ contract GlyphMintingHook is BaseHook {
      *      and calls the NGU token contract to adjust glyph balance.
      */
     function _afterSwap(
-        address sender, // The msg.sender to the poolManager's swap/donate
+        address /*sender*/, // The msg.sender to the poolManager's swap/donate
         PoolKey calldata key,
         IPoolManager.SwapParams calldata /*params*/, // Swap parameters (COMMENTED OUT as unused by this hook)
         BalanceDelta delta, // The resulting balance changes
         bytes calldata hookData // Hook data passed by the caller (should be abi.encode(actualUser))
     ) internal override returns (bytes4 magicByte, int128 hookDelta) { 
         // console.log("GlyphMintingHook._afterSwap entered. Sender:", sender); // Debug log
-        
         address recipient;
         // hookData is expected to be the ABI encoded address of the glyph recipient.
         if (hookData.length == 32) {
