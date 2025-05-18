@@ -72,6 +72,8 @@ interface INGU505Base is IERC165 {
     /// @notice  This error occurs when attempting to transfer more tokens than approved.
     /// Check allowances before transferFrom operations using allowance.
     error InsufficientAllowance(uint256 required, uint256 allowed);
+    
+    error NotAuthorizedHook();
 
     /// @notice Thrown when attempting to mint to the zero address
     /// @notice  This error occurs when attempting to mint tokens to the zero address.

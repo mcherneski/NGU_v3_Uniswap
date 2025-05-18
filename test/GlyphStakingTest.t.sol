@@ -15,6 +15,8 @@ import {BaseGlyphHookTestSetup} from "./utils/BaseGlyphHookTestSetup.sol";
 // Import specific interfaces or libraries needed for staking tests if not covered by base
 import {INGU505Base} from "../src/interfaces/INGU505Base.sol"; // For RangeInfo, etc.
 import {NumberGoUp} from "../src/NumberGoUp.sol"; // To interact with NGU staking functions
+import {NGUStaking} from "../src/NGUStaking.sol"; // Added import for NGUStaking errors
+import {NGUBitMask} from "../src/libraries/Masks.sol"; // Corrected import path for NGUBitMask
 
 contract GlyphStakingTest is BaseGlyphHookTestSetup {
     using Strings for uint256;
@@ -400,8 +402,132 @@ contract GlyphStakingTest is BaseGlyphHookTestSetup {
         vm.stopPrank();
     }
 
-    // TODO: Add test_Stake_Reverts_IfGlyphAlreadyStaked()
-    // TODO: Add test_Unstake_Reverts_IfGlyphNotStaked()
-    // TODO: Add test_Unstake_Reverts_IfNotOwnerOfStakedPosition() (if applicable)
+    function test_Stake_Reverts_IfGlyphAlreadyStaked() public {
+        // 1. Alice acquires a glyph via swap
+        bool zeroForOne = address(weth) < address(ngu);
+        int256 amountSpecifiedSwap = -1e18; // Alice sells 1 WETH
+        uint160 sqrtPriceLimitX96 = zeroForOne ? 
+            TickMath.MIN_SQRT_PRICE + 1 : 
+            TickMath.MAX_SQRT_PRICE - 1;
+
+        vm.startPrank(alice);
+        swapRouter.swap(
+            key,
+            IPoolManager.SwapParams({ zeroForOne: zeroForOne, amountSpecified: amountSpecifiedSwap, sqrtPriceLimitX96: sqrtPriceLimitX96 }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            abi.encode(alice)
+        );
+        vm.stopPrank();
+
+        uint256[] memory aliceOwnedGlyphs = ngu.getQueueGlyphIds(alice);
+        assertTrue(aliceOwnedGlyphs.length > 0, "Alice should own at least one glyph");
+        uint256 glyphIdToStake = aliceOwnedGlyphs[0];
+
+        // 2. Alice stakes the glyph for the first time
+        uint256[] memory stakeArray = new uint256[](1);
+        stakeArray[0] = glyphIdToStake;
+        vm.startPrank(alice);
+        ngu.stake(stakeArray);
+        vm.stopPrank();
+
+        // 3. Verify it is staked
+        (,, , bool isStakedAfterFirstStake) = ngu.getRangeInfo(glyphIdToStake);
+        assertTrue(isStakedAfterFirstStake, "Glyph should be marked as staked after first stake");
+
+        // 4. Alice attempts to stake the same glyph again
+        vm.startPrank(alice);
+        // Assuming NGUStaking.sol or NGU505Base.sol should prevent re-staking an already staked token.
+        // The exact error might be NGUStaking.AlreadyStaked, NGUStaking.InvalidTokenState, or INGU505Base.InvalidState.
+        vm.expectRevert(bytes4(keccak256("InvalidState()"))); // Using direct signature
+        ngu.stake(stakeArray); // Attempt to stake the same glyphIdToStake again
+        vm.stopPrank();
+    }
+
+    function test_Unstake_Reverts_IfGlyphNotStaked() public {
+        // 1. Alice acquires at least two glyphs (glyphA, glyphB)
+        bool zeroForOne = address(weth) < address(ngu);
+        int256 amountSpecifiedSwap = -2e18; // Alice sells 2 WETH to ensure she gets enough glyphs
+        uint160 sqrtPriceLimitX96 = zeroForOne ? 
+            TickMath.MIN_SQRT_PRICE + 1 : 
+            TickMath.MAX_SQRT_PRICE - 1;
+
+        vm.startPrank(alice);
+        swapRouter.swap(
+            key,
+            IPoolManager.SwapParams({ zeroForOne: zeroForOne, amountSpecified: amountSpecifiedSwap, sqrtPriceLimitX96: sqrtPriceLimitX96 }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            abi.encode(alice)
+        );
+        vm.stopPrank();
+
+        uint256[] memory aliceOwnedGlyphs = ngu.getQueueGlyphIds(alice);
+        assertTrue(aliceOwnedGlyphs.length >= 2, "Alice should own at least two glyphs");
+        uint256 glyphIdToStake = aliceOwnedGlyphs[0];      // glyphA
+        uint256 glyphIdToAttemptUnstake = aliceOwnedGlyphs[1]; // glyphB
+
+        // 2. Alice stakes glyphA
+        uint256[] memory stakeArrayA = new uint256[](1);
+        stakeArrayA[0] = glyphIdToStake;
+        vm.startPrank(alice);
+        ngu.stake(stakeArrayA);
+        vm.stopPrank();
+        assertTrue(ngu.stakedBalanceOf(alice) > 0, "Alice should have a staked balance");
+
+        // 3. Verify glyphB is NOT staked 
+        (,, , bool isGlyphBStaked) = ngu.getRangeInfo(glyphIdToAttemptUnstake);
+        assertFalse(isGlyphBStaked, "GlyphB should NOT be marked as staked");
+
+        // 4. Alice attempts to unstake glyphB (which is not staked)
+        uint256[] memory unstakeArrayB = new uint256[](1);
+        unstakeArrayB[0] = glyphIdToAttemptUnstake;
+
+        vm.startPrank(alice);
+        // Expect GlyphNotStaked(uint256 tokenId)
+        vm.expectRevert(abi.encodeWithSelector(bytes4(keccak256("GlyphNotStaked(uint256)")), glyphIdToAttemptUnstake)); 
+        ngu.unstake(unstakeArrayB);
+        vm.stopPrank();
+    }
+
+    function test_Unstake_Reverts_IfNotOwnerOfStakedPosition() public {
+        // 1. Alice acquires glyph X and stakes it
+        vm.startPrank(alice);
+        int256 amountSpecifiedSwapAlice = -1e18; // Alice sells 1 WETH
+        swapRouter.swap(
+            key, IPoolManager.SwapParams({ zeroForOne: (address(weth) < address(ngu)), amountSpecified: amountSpecifiedSwapAlice, sqrtPriceLimitX96: (address(weth) < address(ngu) ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1) }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), abi.encode(alice)
+        );
+        uint256[] memory aliceOwnedGlyphs = ngu.getQueueGlyphIds(alice);
+        assertTrue(aliceOwnedGlyphs.length > 0, "Alice should own glyph X");
+        uint256 glyphIdAliceStakes = aliceOwnedGlyphs[0];
+        uint256[] memory stakeArrayAlice = new uint256[](1); stakeArrayAlice[0] = glyphIdAliceStakes;
+        ngu.stake(stakeArrayAlice);
+        vm.stopPrank();
+        (,, , bool isAliceGlyphStaked) = ngu.getRangeInfo(glyphIdAliceStakes);
+        assertTrue(isAliceGlyphStaked, "Alice's glyph X should be staked");
+
+        // 2. Bob acquires glyph Y and stakes it (so Bob has a stakedBalance > 0)
+        vm.startPrank(bob);
+        int256 amountSpecifiedSwapBob = -1e18; // Bob sells 1 WETH
+        swapRouter.swap(
+            key, IPoolManager.SwapParams({ zeroForOne: (address(weth) < address(ngu)), amountSpecified: amountSpecifiedSwapBob, sqrtPriceLimitX96: (address(weth) < address(ngu) ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1) }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), abi.encode(bob)
+        );
+        uint256[] memory bobOwnedGlyphs = ngu.getQueueGlyphIds(bob);
+        assertTrue(bobOwnedGlyphs.length > 0, "Bob should own glyph Y");
+        uint256 glyphIdBobStakes = bobOwnedGlyphs[0];
+        uint256[] memory stakeArrayBob = new uint256[](1); stakeArrayBob[0] = glyphIdBobStakes;
+        ngu.stake(stakeArrayBob);
+        vm.stopPrank();
+        assertTrue(ngu.stakedBalanceOf(bob) > 0, "Bob should have a staked balance");
+
+        // 3. Bob attempts to unstake Alice's glyph X
+        uint256[] memory unstakeArrayAttempt = new uint256[](1);
+        unstakeArrayAttempt[0] = glyphIdAliceStakes; // Bob tries to unstake Alice's token
+
+        vm.startPrank(bob);
+        vm.expectRevert(INGU505Base.NotAuthorized.selector);
+        ngu.unstake(unstakeArrayAttempt);
+        vm.stopPrank();
+    }
 
 } 

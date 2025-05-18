@@ -16,6 +16,15 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+// Custom NGUStaking errors
+error EmptyStakingArray();
+error EmptyUnstakingArray();
+error InsufficientStakedBalance(uint256 required, uint256 available);
+error GlyphNotStaked(uint256 tokenId);
+// AlreadyStaked might be implicitly covered by InvalidState if not defined explicitly.
+// We have seen InvalidState used. If AlreadyStaked is truly needed, define it.
+// error AlreadyStaked(); // We saw `InvalidState` being used for this logic path in _stakeToken
+
 /**
  * @title NGU Staking Contract
  * @notice Handles staking functionality for the NGU token using StackQueue for unstaked ranges.
@@ -302,7 +311,7 @@ abstract contract NGUStaking is NGU505Base, INGU505Staking {
 
         uint256 totalUnstakeAmount = tokenIds.length * units;
         if (stakedTokenBank[msg.sender] < totalUnstakeAmount) 
-            revert InsufficientBalance(totalUnstakeAmount, stakedTokenBank[msg.sender]);
+            revert InsufficientStakedBalance(totalUnstakeAmount, stakedTokenBank[msg.sender]);
 
         // First pass: validate all tokens can be unstaked without modifying state
         for (uint256 i = 0; i < tokenIds.length;) {

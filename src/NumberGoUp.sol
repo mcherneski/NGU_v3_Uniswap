@@ -4,11 +4,8 @@ pragma solidity ^0.8.24;  // Update to latest version
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {NGUStaking} from "./NGUStaking.sol";
-// import {NGU505UniswapV3Exempt} from "./lib/NGU505UniswaV3Exempt.sol";
 import {NGU505Base} from "./NGU505Base.sol";
 import {console2 as console} from "forge-std/console2.sol";
-
-error NotAuthorizedHook();
 
 contract NumberGoUp is Ownable, NGUStaking {
     using Strings for uint256;
