@@ -174,22 +174,25 @@ contract NGUGlyph is ERC1155, AccessControl {
         address owner = _msgSender();
         LinkedListQueue.Queue storage queue = _ownerQueue[owner];
 
+        uint256[] memory burnIds = new uint256[](dequeueRequests.length);
+        uint256[] memory burnAmounts = new uint256[](dequeueRequests.length);
+
         uint256 stakedLength;
+        uint256 upsertQueueLength;
         for (uint256 i; i < dequeueRequests.length; i++) {
             RemoveQueueRequest memory request = dequeueRequests[i];
             require(request.ranges.length > 0, DequeueRequestRangeEmpty(request.id));
 
-            // Burn the tokens from the queue range
+            // Track the glyphs to burn from the queue range
             uint256 oldSize = balanceOf(owner, request.id);
             require(oldSize > 0, InvalidUserQueueToken(owner, request.id));
-            uint128 lastRangeId = request.id + uint128(oldSize) - 1;
-            _burn(owner, request.id, oldSize);
+            burnIds[i] = request.id;
+            burnAmounts[i] = oldSize;
 
-            // Set the previous node as the cursor then remove it from the queue
-            uint128 cursor = queue.at(request.id).prev;
             uint128 next = request.id;
-            queue.remove(request.id);
+            uint128 lastRangeId = request.id + uint128(oldSize) - 1;
 
+            // Track the length of the staked glyphs to mint
             stakedLength += request.ranges.length;
             for (uint256 j; j < request.ranges.length; j++) {
                 Range memory range = request.ranges[j];
@@ -200,17 +203,62 @@ contract NGUGlyph is ERC1155, AccessControl {
                 );
                 require(range.start >= next, SubRangesNotSequential(request.id, next, range.start));
 
+                // Track the length of the glyphs to upsert from next section of the range
                 if (range.start > next) {
-                    // Add missing range to queue and mint to user
+                    upsertQueueLength++;
+                }
+
+                next = range.end + 1;
+            }
+            // Track the length of the glyphs to upsert from last section of the range
+            if (request.ranges[request.ranges.length - 1].end < lastRangeId) {
+                upsertQueueLength++;
+            }
+        }
+
+        uint256[] memory upsertQueueTokenIds = new uint256[](upsertQueueLength);
+        uint256[] memory upsertQueueAmounts = new uint256[](upsertQueueLength);
+        uint256 upsertIndex;
+
+        uint256[] memory stakedTokenIds = new uint256[](stakedLength);
+        uint256[] memory stakedAmounts = new uint256[](stakedLength);
+
+        for (uint256 i; i < dequeueRequests.length; i++) {
+            RemoveQueueRequest memory request = dequeueRequests[i];
+
+            // Set the previous node as the cursor then remove it from the queue
+            uint128 next = request.id;
+            uint128 cursor = queue.at(next).prev;
+            uint128 lastRangeId = next + uint128(balanceOf(owner, next)) - 1;
+
+            // Remove the range from the queue
+            queue.remove(next);
+
+            for (uint256 j; j < request.ranges.length; j++) {
+                Range memory range = request.ranges[j];
+
+                // Track the range for the staked glyphs
+                stakedTokenIds[i * request.ranges.length + j] = request.ranges[j].start;
+                stakedAmounts[i * request.ranges.length + j] = request.ranges[j].end - request.ranges[j].start + 1;
+
+                if (range.start > next) {
+                    // Add missing range to queue
                     cursor == 0 ? queue.pushFront(next) : queue.insertAfter(cursor, next);
-                    _mint(owner, next, range.start - next, "");
+
+                    // Track the range of glyphs to mint
+                    upsertQueueTokenIds[upsertIndex] = next;
+                    upsertQueueAmounts[upsertIndex++] = range.start - next;
+
                     cursor = next;
                 }
 
                 if (j == request.ranges.length - 1 && range.end < lastRangeId) {
-                    // Add missing range to queue and mint to user
+                    // Add missing range to queue
                     cursor == 0 ? queue.pushFront(range.end + 1) : queue.insertAfter(cursor, range.end + 1);
-                    _mint(owner, range.end + 1, lastRangeId - range.end, "");
+
+                    // Track the range of glyphs to mint
+                    upsertQueueTokenIds[upsertIndex] = range.end + 1;
+                    upsertQueueAmounts[upsertIndex++] = lastRangeId - range.end;
                 }
 
                 next = range.end + 1;
@@ -219,19 +267,13 @@ contract NGUGlyph is ERC1155, AccessControl {
             }
         }
 
-        // Mint staked glyphs
-        uint256[] memory stakedTokenIds = new uint256[](stakedLength);
-        uint256[] memory stakedAmounts = new uint256[](stakedLength);
-        for (uint256 i; i < dequeueRequests.length; i++) {
-            Range[] memory ranges = dequeueRequests[i].ranges;
-            for (uint256 j; j < ranges.length; j++) {
-                uint256 index = i * ranges.length + j;
-                stakedTokenIds[index] = ranges[j].start;
-                stakedAmounts[index] = ranges[j].end - ranges[j].start + 1;
-            }
-        }
+        // Burn old ranges from the queue
+        _burnBatch(owner, burnIds, burnAmounts);
 
-        // Mint staked glyphs
+        // Mint new glyph ranges
+        _mintBatch(owner, upsertQueueTokenIds, upsertQueueAmounts, "");
+
+        // Mint staked glyph ranges
         stGlyph.mintBatch(owner, stakedTokenIds, stakedAmounts, "");
     }
 
