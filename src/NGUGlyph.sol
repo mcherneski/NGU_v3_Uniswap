@@ -7,11 +7,9 @@ import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import {LinkedListQueue} from "./libraries/LinkedListQueue.sol";
 import {NGUStakedGlyph} from "./NGUStakedGlyph.sol";
 
-/**
- * @title NGUGlyph
- * @dev Implementation of the ERC1155 multi-token standard for the NGU project with role-based access control.
- * This contract allows for multiple glyphs, each with their own supply and metadata.
- */
+/// @title NGUGlyph
+/// @notice Implementation of the ERC1155 multi-token standard for the NGU project with role-based access control.
+/// @dev This contract allows for multiple glyphs, each with their own supply and metadata.
 contract NGUGlyph is ERC1155, AccessControl {
     using LinkedListQueue for LinkedListQueue.Queue;
 
@@ -24,25 +22,71 @@ contract NGUGlyph is ERC1155, AccessControl {
 
     mapping(address => LinkedListQueue.Queue) private _ownerQueue;
 
-    /**
-     * @dev Emitted when a new glyph is created
-     */
+    /// @notice Emitted when a new glyph is created
+    /// @param id The ID of the created glyph
+    /// @param amount The amount of tokens minted
     event GlyphCreated(uint128 id, uint128 amount);
 
-    /**
-     * @dev Emitted when glyphs are removed from the user's queue
-     */
+    /// @notice Emitted when glyphs are removed from the user's queue
+    /// @param user The address of the user
+    /// @param start The starting ID of the removed range
+    /// @param end The ending ID of the removed range
     event GlyphsDequeued(address user, uint128 start, uint128 end);
 
     /**
-     * @dev Constructor that sets up the default admin role
+     * @dev Thrown when a dequeue request is empty.
      */
+    error DequeueRequestEmpty();
+
+    /**
+     * @dev Thrown when a dequeue request range is empty.
+     * @param tokenId Identifier of the token.
+     */
+    error DequeueRequestRangeEmpty(uint128 tokenId);
+
+    /**
+     * @dev Thrown when the user does not have the specified token in their queue.
+     * @param user Address of the user.
+     * @param tokenId Identifier of the token.
+     */
+    error InvalidUserQueueToken(address user, uint128 tokenId);
+
+    /**
+     * @dev Thrown when the specified range is invalid.
+     * @param tokenId Identifier of the token.
+     * @param start Start of the range.
+     * @param end End of the range.
+     */
+    error InvalidRange(uint128 tokenId, uint128 start, uint128 end);
+
+    /**
+     * @dev Thrown when the sub-range is out of bounds.
+     * @param rangeMin Minimum of the range.
+     * @param rangeMax Maximum of the range.
+     * @param start Start of the sub-range.
+     * @param end End of the sub-range.
+     */
+    error SubRangeOutOfBounds(uint128 rangeMin, uint128 rangeMax, uint128 start, uint128 end);
+
+    /**
+     * @dev Thrown when the sub-ranges are not sequential.
+     * @param tokenId Identifier of the token.
+     * @param minStart Minimum start of the sub-ranges.
+     * @param start Start of the sub-range.
+     */
+    error SubRangesNotSequential(uint128 tokenId, uint128 minStart, uint128 start);
+
+    /// @notice Constructor that sets up the default admin role and deploys the staked glyph contract
     constructor() ERC1155("") {
         _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
 
         stGlyph = new NGUStakedGlyph("");
     }
 
+    /// @notice Get the token ranges in a user's queue
+    /// @param user The address of the user
+    /// @return tokenStart Array of starting token IDs in the queue
+    /// @return tokenEnd Array of ending token IDs in the queue
     function userTokenQueue(address user)
         public
         view
@@ -60,17 +104,21 @@ contract NGUGlyph is ERC1155, AccessControl {
         }
     }
 
+    /// @notice Get the end of a token range for a user
+    /// @param user The address of the user
+    /// @param cursor The starting token ID of the range
+    /// @return The ending token ID of the range, or 0 if not found
     function userQueueRangeEnd(address user, uint128 cursor) public view returns (uint128) {
         uint128 balance = uint128(balanceOf(user, cursor));
         return balance == 0 ? 0 : cursor + balance - 1;
     }
 
-    /**
-     * @dev Creates a new glyph with an auto-incrementing ID
-     * @param amount Amount of tokens to mint
-     * @param data Additional data with no specified format, sent to the receiver
-     * @return The ID of the newly created glyph
-     */
+    /// @notice Creates a new glyph with an auto-incrementing ID
+    /// @param to The address that will receive the minted tokens
+    /// @param amount Amount of tokens to mint
+    /// @param data Additional data with no specified format, sent to the receiver
+    /// @return The ID of the newly created glyph
+    /// @dev Only callable by addresses with the COMPTROLLER_ROLE
     function createGlyphs(address to, uint128 amount, bytes memory data)
         external
         onlyRole(COMPTROLLER_ROLE)
@@ -93,13 +141,11 @@ contract NGUGlyph is ERC1155, AccessControl {
         return tokenId;
     }
 
-    /**
-     * @dev Checks if two token IDs can be merged into a single range
-     * @param user The address of the user
-     * @param rangeStart1 The first token ID
-     * @param rangeStart2 The second token ID
-     * @return True if the two token IDs can be merged, else false
-     */
+    /// @notice Checks if two token IDs can be merged into a single range
+    /// @param user The address of the user
+    /// @param rangeStart1 The first token ID
+    /// @param rangeStart2 The second token ID
+    /// @return True if the two token IDs can be merged, else false
     function canMergeRanges(address user, uint128 rangeStart1, uint128 rangeStart2) public view returns (bool) {
         if (rangeStart1 == 0 || rangeStart2 == 0) return false;
 
@@ -119,17 +165,9 @@ contract NGUGlyph is ERC1155, AccessControl {
         uint128 end;
     }
 
-    error DequeueRequestEmpty();
-    error DequeueRequestRangeEmpty(uint128 tokenId);
-    error InvalidUserQueueToken(address user, uint128 tokenId);
-    error InvalidRange(uint128 tokenId, uint128 start, uint128 end);
-    error SubRangeOutOfBounds(uint128 rangeMin, uint128 rangeMax, uint128 start, uint128 end);
-    error SubRangesNotSequential(uint128 tokenId, uint128 minStart, uint128 start);
-
-    /**
-     * @dev Removes multiple token IDs from the user's queue
-     * @param dequeueRequests Array of RemoveQueueRequest structs
-     */
+    /// @notice Removes multiple token IDs from the user's queue and stakes them
+    /// @param dequeueRequests Array of RemoveQueueRequest structs containing the ranges to dequeue and stake
+    /// @dev The function will revert if any of the requests are invalid or out of bounds
     function dequeueGlyphsAndStake(RemoveQueueRequest[] memory dequeueRequests) external {
         require(dequeueRequests.length > 0, DequeueRequestEmpty());
 
@@ -197,9 +235,7 @@ contract NGUGlyph is ERC1155, AccessControl {
         stGlyph.mintBatch(owner, stakedTokenIds, stakedAmounts, "");
     }
 
-    /**
-     * @dev See {IERC165-supportsInterface}.
-     */
+    /// @dev See {IERC165-supportsInterface}.
     function supportsInterface(bytes4 interfaceId)
         public
         view

@@ -17,7 +17,24 @@ library LinkedListQueue {
     }
 
     /// @notice Error for token that does not exist.
+    /// @param id The id of the non-existent token.
     error TokenDoesNotExist(uint128 id);
+
+    /// @notice Error for invalid id (0).
+    /// @param id The invalid id.
+    error InvalidId(uint128 id);
+
+    /// @notice Error for id already in use.
+    /// @param id The id that is already in use.
+    error IdAlreadyUsed(uint128 id);
+
+    /// @notice Error for id not in queue.
+    /// @param id The id that is not in the queue.
+    error IdNotInQueue(uint128 id);
+
+    /// @notice Error for cursor that does not exist.
+    /// @param id The id of the non-existent cursor.
+    error CursorDoesNotExist(uint128 id);
 
     /// @notice Checks if _id is in the queue.
     function exists(Queue storage q, uint128 _id) internal view returns (bool) {
@@ -34,8 +51,8 @@ library LinkedListQueue {
     /// @notice Pushes a new node to the front.
     /// @dev Reverts if _id is zero or already in use.
     function pushFront(Queue storage q, uint128 _id) internal {
-        require(_id != 0, "Invalid id");
-        require(!exists(q, _id), "ID already used");
+        require(_id != 0, InvalidId(_id));
+        require(!exists(q, _id), IdAlreadyUsed(_id));
 
         Node storage n = q.nodes[_id];
 
@@ -54,8 +71,8 @@ library LinkedListQueue {
     /// @notice Pushes a new node to the back.
     /// @dev Reverts if _id is zero or already in use.
     function pushBack(Queue storage q, uint128 _id) internal {
-        require(_id != 0, "Invalid id");
-        require(!exists(q, _id), "ID already used");
+        require(_id != 0, InvalidId(_id));
+        require(!exists(q, _id), IdAlreadyUsed(_id));
 
         Node storage n = q.nodes[_id];
 
@@ -74,9 +91,9 @@ library LinkedListQueue {
     /// @notice Inserts a new node immediately before an existing node _cursor.
     /// @dev Reverts if _id is zero or already used, or if _cursor doesn't exist.
     function insertBefore(Queue storage q, uint128 _cursor, uint128 _id) internal {
-        require(exists(q, _cursor), "Cursor does not exist");
-        require(_id != 0, "Invalid id");
-        require(!exists(q, _id), "ID already used");
+        require(exists(q, _cursor), CursorDoesNotExist(_cursor));
+        require(_id != 0, InvalidId(_id));
+        require(!exists(q, _id), IdAlreadyUsed(_id));
 
         Node storage curNode = q.nodes[_cursor];
         Node storage newNode = q.nodes[_id];
@@ -98,9 +115,9 @@ library LinkedListQueue {
     /// @notice Inserts a new node immediately after an existing node _cursor.
     /// @dev Reverts if _id is zero or already used, or if _cursor doesn't exist.
     function insertAfter(Queue storage q, uint128 _cursor, uint128 _id) internal {
-        require(exists(q, _cursor), "Cursor does not exist");
-        require(_id != 0, "Invalid id");
-        require(!exists(q, _id), "ID already used");
+        require(exists(q, _cursor), CursorDoesNotExist(_cursor));
+        require(_id != 0, InvalidId(_id));
+        require(!exists(q, _id), IdAlreadyUsed(_id));
 
         Node storage curNode = q.nodes[_cursor];
         Node storage newNode = q.nodes[_id];
@@ -122,7 +139,7 @@ library LinkedListQueue {
     /// @notice Removes the node with id `_id` in O(1).
     /// @dev Reverts if queue is empty or `_id` is invalid.
     function remove(Queue storage q, uint128 _id) internal {
-        require(q.length > 0, "Empty");
+        require(q.length > 0, IdNotInQueue(_id));
 
         Node storage n = at(q, _id);
 
