@@ -61,7 +61,7 @@ contract NGUGlyphTest is Test {
         assertEq(aliceTokenEnd[0], 135, "aliceTokenEnd[0] should be 135");
     }
 
-    function test_dequeueGlyphsAndStake() public {
+    function test_dequeueGlyphsAndStake_success() public {
         glyph.createGlyphs(alice.addr, 120, "");
 
         NGUGlyph.RemoveQueueRequest[] memory requests = new NGUGlyph.RemoveQueueRequest[](1);

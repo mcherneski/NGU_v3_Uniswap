@@ -7,7 +7,6 @@ library LinkedListQueue {
     struct Node {
         uint256 prev;
         uint256 next;
-        uint256 data;
     }
 
     struct Queue {
@@ -22,7 +21,7 @@ library LinkedListQueue {
 
     /// @notice Checks if _id is in the queue.
     function exists(Queue storage q, uint256 _id) internal view returns (bool) {
-        return q.nodes[_id].data != 0;
+        return q.nodes[_id].prev != 0 || q.nodes[_id].next != 0 || _id == q.head || _id == q.tail;
     }
 
     /// @notice Returns the node with _id in O(1).
@@ -39,7 +38,6 @@ library LinkedListQueue {
         require(!exists(q, _id), "ID already used");
 
         Node storage n = q.nodes[_id];
-        n.data = _id;
 
         if (q.length == 0) {
             q.head = _id;
@@ -60,7 +58,6 @@ library LinkedListQueue {
         require(!exists(q, _id), "ID already used");
 
         Node storage n = q.nodes[_id];
-        n.data = _id;
 
         if (q.length == 0) {
             q.head = _id;
@@ -87,7 +84,6 @@ library LinkedListQueue {
         // link in
         newNode.prev = curNode.prev;
         newNode.next = _cursor;
-        newNode.data = _id;
         curNode.prev = _id;
 
         if (newNode.prev != 0) {
@@ -112,7 +108,6 @@ library LinkedListQueue {
         // link in
         newNode.prev = _cursor;
         newNode.next = curNode.next;
-        newNode.data = _id;
         curNode.next = _id;
 
         if (newNode.next != 0) {
