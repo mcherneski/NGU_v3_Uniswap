@@ -20,19 +20,19 @@ contract NGUGlyph is ERC1155, AccessControl {
     NGUStakedGlyph public stGlyph;
 
     // Counter for generating new token IDs
-    uint256 private _nextTokenId = 1;
+    uint128 private _nextTokenId = 1;
 
     mapping(address => LinkedListQueue.Queue) private _ownerQueue;
 
     /**
      * @dev Emitted when a new glyph is created
      */
-    event GlyphCreated(uint256 indexed id, uint256 amount);
+    event GlyphCreated(uint128 id, uint128 amount);
 
     /**
      * @dev Emitted when glyphs are removed from the user's queue
      */
-    event GlyphsDequeued(address indexed user, uint256 start, uint256 end);
+    event GlyphsDequeued(address user, uint128 start, uint128 end);
 
     /**
      * @dev Constructor that sets up the default admin role
@@ -46,22 +46,22 @@ contract NGUGlyph is ERC1155, AccessControl {
     function userTokenQueue(address user)
         public
         view
-        returns (uint256[] memory tokenStart, uint256[] memory tokenEnd)
+        returns (uint128[] memory tokenStart, uint128[] memory tokenEnd)
     {
         LinkedListQueue.Queue storage queue = _ownerQueue[user];
-        tokenStart = new uint256[](queue.length);
-        tokenEnd = new uint256[](queue.length);
+        tokenStart = new uint128[](queue.length);
+        tokenEnd = new uint128[](queue.length);
 
-        uint256 cursor = queue.head;
-        for (uint256 i = 0; i < queue.length; i++) {
+        uint128 cursor = queue.head;
+        for (uint128 i; i < queue.length; i++) {
             tokenStart[i] = cursor;
             tokenEnd[i] = userQueueRangeEnd(user, cursor);
             cursor = queue.at(cursor).next;
         }
     }
 
-    function userQueueRangeEnd(address user, uint256 cursor) public view returns (uint256) {
-        uint256 balance = balanceOf(user, cursor);
+    function userQueueRangeEnd(address user, uint128 cursor) public view returns (uint128) {
+        uint128 balance = uint128(balanceOf(user, cursor));
         return balance == 0 ? 0 : cursor + balance - 1;
     }
 
@@ -71,13 +71,13 @@ contract NGUGlyph is ERC1155, AccessControl {
      * @param data Additional data with no specified format, sent to the receiver
      * @return The ID of the newly created glyph
      */
-    function createGlyphs(address to, uint256 amount, bytes memory data)
+    function createGlyphs(address to, uint128 amount, bytes memory data)
         external
         onlyRole(COMPTROLLER_ROLE)
-        returns (uint256)
+        returns (uint128)
     {
         LinkedListQueue.Queue storage queue = _ownerQueue[to];
-        uint256 tokenId;
+        uint128 tokenId;
 
         if (canMergeRanges(to, _nextTokenId, queue.tail)) {
             tokenId = queue.tail;
@@ -100,31 +100,31 @@ contract NGUGlyph is ERC1155, AccessControl {
      * @param rangeStart2 The second token ID
      * @return True if the two token IDs can be merged, else false
      */
-    function canMergeRanges(address user, uint256 rangeStart1, uint256 rangeStart2) public view returns (bool) {
+    function canMergeRanges(address user, uint128 rangeStart1, uint128 rangeStart2) public view returns (bool) {
         if (rangeStart1 == 0 || rangeStart2 == 0) return false;
 
-        uint256 rangeEnd1 = userQueueRangeEnd(user, rangeStart1);
-        uint256 rangeEnd2 = userQueueRangeEnd(user, rangeStart2);
+        uint128 rangeEnd1 = userQueueRangeEnd(user, rangeStart1);
+        uint128 rangeEnd2 = userQueueRangeEnd(user, rangeStart2);
 
         return (rangeEnd1 != 0 && rangeEnd1 + 1 == rangeStart2) || (rangeEnd2 != 0 && rangeEnd2 + 1 == rangeStart1);
     }
 
     struct RemoveQueueRequest {
-        uint256 id;
+        uint128 id;
         Range[] ranges;
     }
 
     struct Range {
-        uint256 start;
-        uint256 end;
+        uint128 start;
+        uint128 end;
     }
 
     error DequeueRequestEmpty();
-    error DequeueRequestRangeEmpty(uint256 tokenId);
-    error InvalidUserQueueToken(address user, uint256 tokenId);
-    error InvalidRange(uint256 tokenId, uint256 start, uint256 end);
-    error SubRangeOutOfBounds(uint256 rangeMin, uint256 rangeMax, uint256 start, uint256 end);
-    error SubRangesNotSequential(uint256 tokenId, uint256 minStart, uint256 start);
+    error DequeueRequestRangeEmpty(uint128 tokenId);
+    error InvalidUserQueueToken(address user, uint128 tokenId);
+    error InvalidRange(uint128 tokenId, uint128 start, uint128 end);
+    error SubRangeOutOfBounds(uint128 rangeMin, uint128 rangeMax, uint128 start, uint128 end);
+    error SubRangesNotSequential(uint128 tokenId, uint128 minStart, uint128 start);
 
     /**
      * @dev Removes multiple token IDs from the user's queue
@@ -137,23 +137,23 @@ contract NGUGlyph is ERC1155, AccessControl {
         LinkedListQueue.Queue storage queue = _ownerQueue[owner];
 
         uint256 stakedLength;
-        for (uint256 i = 0; i < dequeueRequests.length; i++) {
+        for (uint256 i; i < dequeueRequests.length; i++) {
             RemoveQueueRequest memory request = dequeueRequests[i];
             require(request.ranges.length > 0, DequeueRequestRangeEmpty(request.id));
 
             // Burn the tokens from the queue range
             uint256 oldSize = balanceOf(owner, request.id);
             require(oldSize > 0, InvalidUserQueueToken(owner, request.id));
-            uint256 lastRangeId = request.id + oldSize - 1;
+            uint128 lastRangeId = request.id + uint128(oldSize) - 1;
             _burn(owner, request.id, oldSize);
 
             // Set the previous node as the cursor then remove it from the queue
-            uint256 cursor = queue.at(request.id).prev;
-            uint256 next = request.id;
+            uint128 cursor = queue.at(request.id).prev;
+            uint128 next = request.id;
             queue.remove(request.id);
 
             stakedLength += request.ranges.length;
-            for (uint256 j = 0; j < request.ranges.length; j++) {
+            for (uint256 j; j < request.ranges.length; j++) {
                 Range memory range = request.ranges[j];
                 require(range.start <= range.end, InvalidRange(request.id, range.start, range.end));
                 require(
@@ -184,9 +184,9 @@ contract NGUGlyph is ERC1155, AccessControl {
         // Mint staked glyphs
         uint256[] memory stakedTokenIds = new uint256[](stakedLength);
         uint256[] memory stakedAmounts = new uint256[](stakedLength);
-        for (uint256 i = 0; i < dequeueRequests.length; i++) {
+        for (uint256 i; i < dequeueRequests.length; i++) {
             Range[] memory ranges = dequeueRequests[i].ranges;
-            for (uint256 j = 0; j < ranges.length; j++) {
+            for (uint256 j; j < ranges.length; j++) {
                 uint256 index = i * ranges.length + j;
                 stakedTokenIds[index] = ranges[j].start;
                 stakedAmounts[index] = ranges[j].end - ranges[j].start + 1;

@@ -8,7 +8,7 @@ library GlyphTestHelpers {
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     function printQueue(NGUGlyph glyph, address user) public {
-        (uint256[] memory tokenStart, uint256[] memory tokenEnd) = glyph.userTokenQueue(user);
+        (uint128[] memory tokenStart, uint128[] memory tokenEnd) = glyph.userTokenQueue(user);
 
         console.log("Queue for user:", vm.getLabel(user));
         for (uint256 i; i < tokenStart.length; i++) {

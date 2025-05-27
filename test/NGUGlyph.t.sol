@@ -20,7 +20,7 @@ contract NGUGlyphTest is Test {
     }
 
     function test_createGlyphs_autoIncrementID() public {
-        uint256 tokenId;
+        uint128 tokenId;
 
         tokenId = glyph.createGlyphs(alice.addr, 100, "");
         assertEq(tokenId, 1, "token id should be 1");
@@ -34,7 +34,7 @@ contract NGUGlyphTest is Test {
         glyph.createGlyphs(bob.addr, 20, "");
         glyph.createGlyphs(alice.addr, 35, "");
 
-        (uint256[] memory aliceTokenStart, uint256[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
+        (uint128[] memory aliceTokenStart, uint128[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
         assertEq(aliceTokenStart.length, 2, "alice queue length should be 2");
 
         assertEq(aliceTokenStart[0], 1, "aliceTokenStart[0] should be 1");
@@ -43,7 +43,7 @@ contract NGUGlyphTest is Test {
         assertEq(aliceTokenStart[1], 121, "aliceTokenStart[1] should be 121");
         assertEq(aliceTokenEnd[1], 155, "aliceTokenEnd[1] should be 155");
 
-        (uint256[] memory bobTokenStart, uint256[] memory bobTokenEnd) = glyph.userTokenQueue(bob.addr);
+        (uint128[] memory bobTokenStart, uint128[] memory bobTokenEnd) = glyph.userTokenQueue(bob.addr);
         assertEq(bobTokenStart.length, 1, "bob queue length should be 1");
 
         assertEq(bobTokenStart[0], 101, "bobTokenStart[0] should be 101");
@@ -54,7 +54,7 @@ contract NGUGlyphTest is Test {
         glyph.createGlyphs(alice.addr, 100, "");
         glyph.createGlyphs(alice.addr, 35, "");
 
-        (uint256[] memory aliceTokenStart, uint256[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
+        (uint128[] memory aliceTokenStart, uint128[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
         assertEq(aliceTokenStart.length, 1, "alice queue length should be 1");
 
         assertEq(aliceTokenStart[0], 1, "aliceTokenStart[0] should be 1");
@@ -81,7 +81,7 @@ contract NGUGlyphTest is Test {
         vm.prank(alice.addr);
         glyph.dequeueGlyphsAndStake(requests);
 
-        (uint256[] memory tokenStart, uint256[] memory tokenEnd) = glyph.userTokenQueue(alice.addr);
+        (uint128[] memory tokenStart, uint128[] memory tokenEnd) = glyph.userTokenQueue(alice.addr);
         assertEq(tokenStart.length, 3, "tokenStart length should be 3");
 
         assertEq(tokenStart[0], 1, "tokenStart[0] ID should be 1");
@@ -190,8 +190,8 @@ contract NGUGlyphTest is Test {
     function _dequeueGlyphsAndStake_subRangeOutOfBounds(
         address user,
         NGUGlyph.RemoveQueueRequest[] memory requests,
-        uint256 start,
-        uint256 end
+        uint128 start,
+        uint128 end
     ) internal {
         requests[0].ranges[0].start = start;
         requests[0].ranges[0].end = end;
