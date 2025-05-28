@@ -4,7 +4,7 @@ pragma solidity ^0.8.13;
 import {Test, Vm, console} from "forge-std/Test.sol";
 
 import {NGUGlyph} from "../src/NGUGlyph.sol";
-import {LinkedListQueue} from "../src/libraries/LinkedListQueue.sol";
+import {LinkedListQueue, TokenDoesNotExist} from "../src/libraries/LinkedListQueue.sol";
 import {GlyphTestHelpers} from "./utils/GlyphTestHelpers.sol";
 
 contract NGUGlyphTest is Test {
@@ -184,7 +184,7 @@ contract NGUGlyphTest is Test {
         request.splitRangeCount = new uint256[](1);
         request.splitRangeCount[0] = 0;
 
-        vm.expectRevert(abi.encodeWithSelector(LinkedListQueue.TokenDoesNotExist.selector, 2));
+        vm.expectRevert(abi.encodeWithSelector(TokenDoesNotExist.selector, 2));
         vm.prank(alice.addr);
         glyph.stakeGlyphs(request);
     }

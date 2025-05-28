@@ -16,7 +16,6 @@ import {NGUStakedGlyph} from "./NGUStakedGlyph.sol";
 ///  If you want to stake a single token, or sub-range of tokens, that are part of an existing range, you must split the
 ///  range into multiple smaller ranges of sequential token IDs. See {stakeGlyphs}
 contract NGUGlyph is ERC1155, AccessControl {
-    using LinkedListQueue for LinkedListQueue.Queue;
     using Arrays for uint256[];
 
     bytes32 public immutable COMPTROLLER_ROLE = keccak256("COMPTROLLER_ROLE");
@@ -26,7 +25,7 @@ contract NGUGlyph is ERC1155, AccessControl {
     // Counter for generating new token IDs
     uint256 private _nextTokenId = 1;
 
-    mapping(address => LinkedListQueue.Queue) private _ownerQueue;
+    mapping(address => LinkedListQueue) private _ownerQueue;
     mapping(address account => uint256) private _balances;
 
     enum RangeType {
@@ -94,7 +93,7 @@ contract NGUGlyph is ERC1155, AccessControl {
         view
         returns (uint256[] memory tokenStart, uint256[] memory tokenEnd)
     {
-        LinkedListQueue.Queue storage queue = _ownerQueue[user];
+        LinkedListQueue storage queue = _ownerQueue[user];
         tokenStart = new uint256[](queue.length);
         tokenEnd = new uint256[](queue.length);
 
@@ -128,7 +127,7 @@ contract NGUGlyph is ERC1155, AccessControl {
     {
         require(amount > 0, AmountMustBePositive());
 
-        LinkedListQueue.Queue storage queue = _ownerQueue[to];
+        LinkedListQueue storage queue = _ownerQueue[to];
         uint256 tokenId;
 
         if (canMergeRanges(to, _nextTokenId, queue.tail)) {
@@ -236,7 +235,7 @@ contract NGUGlyph is ERC1155, AccessControl {
             )
         );
 
-        LinkedListQueue.Queue storage queue = _ownerQueue[_msgSender()];
+        LinkedListQueue storage queue = _ownerQueue[_msgSender()];
 
         SplitVars memory vars;
 
