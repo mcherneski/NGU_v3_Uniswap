@@ -3,6 +3,7 @@ pragma solidity ^0.8.10;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {NGUGlyph} from "./NGUGlyph.sol";
 
 /**
  * @title NGUToken
@@ -11,6 +12,8 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
  */
 contract NGUToken is ERC20, AccessControl {
     bytes32 public constant COMPTROLLER_ROLE = keccak256("COMPTROLLER_ROLE");
+
+    NGUGlyph public immutable glyph;
 
     /**
      * @dev Constructor that mints the initial supply to the deployer's address
@@ -21,6 +24,24 @@ contract NGUToken is ERC20, AccessControl {
         _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
 
         _mint(_msgSender(), initialSupply * (10 ** uint256(decimals())));
+
+        glyph = new NGUGlyph(_msgSender());
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        super._update(from, to, value);
+
+        // When a user transfers out their tokens, we burn their glyphs
+        if (from != address(0)) {
+            uint256 balance = balanceOf(from) / (10 ** uint256(decimals()));
+            uint256 glyphBalance = glyph.balanceOf(from);
+            if (balance < glyphBalance) {
+                unchecked {
+                    uint256 amountToBurn = glyphBalance - balance;
+                    glyph.burnGlyphs(from, amountToBurn);
+                }
+            }
+        }
     }
 
     /**

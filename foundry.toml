@@ -12,6 +12,7 @@ solc_version = "0.8.26"
 optimizer = true
 optimizer_runs = 200
 via_ir = true
+gas_reports = ["*"]
 
 [profile.permit2]
 solc = "0.8.17"

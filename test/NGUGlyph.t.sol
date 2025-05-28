@@ -16,7 +16,7 @@ contract NGUGlyphTest is Test {
     Vm.Wallet public bob = vm.createWallet("bob");
 
     function setUp() public {
-        glyph = new NGUGlyph();
+        glyph = new NGUGlyph(address(this));
         glyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(this));
     }
 

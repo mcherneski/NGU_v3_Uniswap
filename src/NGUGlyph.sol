@@ -82,8 +82,8 @@ contract NGUGlyph is ERC1155, AccessControl {
     error RangeOutOfBounds(RangeType rangeType, uint256 lower, uint256 upper, uint256 start, uint256 end);
 
     /// @notice Constructor that sets up the default admin role and deploys the staked glyph contract
-    constructor() ERC1155("") {
-        _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
+    constructor(address defaultAdmin) ERC1155("") {
+        _grantRole(DEFAULT_ADMIN_ROLE, defaultAdmin);
 
         stGlyph = new NGUStakedGlyph("");
     }
