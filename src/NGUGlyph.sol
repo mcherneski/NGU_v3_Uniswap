@@ -3,15 +3,21 @@ pragma solidity ^0.8.10;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import {Arrays} from "@openzeppelin/contracts/utils/Arrays.sol";
 
 import {LinkedListQueue} from "./libraries/LinkedListQueue.sol";
 import {NGUStakedGlyph} from "./NGUStakedGlyph.sol";
 
 /// @title NGUGlyph
-/// @notice Implementation of the ERC1155 multi-token standard for the NGU project with role-based access control.
-/// @dev This contract allows for multiple glyphs, each with their own supply and metadata.
+/// @notice Implementation of the ERC1155 token standard with a twist.
+/// @dev The underlying balance mapping (`tokenId` -> `value`) represents a range, where each value within that range
+///  represents a single token.
+///
+///  If you want to stake a single token, or sub-range of tokens, that are part of an existing range, you must split the
+///  range into multiple smaller ranges of sequential token IDs. See {stakeGlyphs}
 contract NGUGlyph is ERC1155, AccessControl {
     using LinkedListQueue for LinkedListQueue.Queue;
+    using Arrays for uint256[];
 
     bytes32 public immutable COMPTROLLER_ROLE = keccak256("COMPTROLLER_ROLE");
 
@@ -21,12 +27,16 @@ contract NGUGlyph is ERC1155, AccessControl {
     uint256 private _nextTokenId = 1;
 
     mapping(address => LinkedListQueue.Queue) private _ownerQueue;
+    mapping(address account => uint256) private _balances;
 
     enum RangeType {
         EXISTING,
         REQUEUE,
         STAKE
     }
+
+    /// @dev Thrown when the amount to be minted is zero.
+    error AmountMustBePositive();
 
     /// @dev Thrown when a stake request is empty.
     error StakeRequestEmpty();
@@ -71,6 +81,10 @@ contract NGUGlyph is ERC1155, AccessControl {
         stGlyph = new NGUStakedGlyph("");
     }
 
+    function balanceOf(address account) public view returns (uint256) {
+        return _balances[account];
+    }
+
     /// @notice Get the token ranges in a user's queue
     /// @param user The address of the user
     /// @return tokenStart Array of starting token IDs in the queue
@@ -112,6 +126,8 @@ contract NGUGlyph is ERC1155, AccessControl {
         onlyRole(COMPTROLLER_ROLE)
         returns (uint256)
     {
+        require(amount > 0, AmountMustBePositive());
+
         LinkedListQueue.Queue storage queue = _ownerQueue[to];
         uint256 tokenId;
 
@@ -355,6 +371,37 @@ contract NGUGlyph is ERC1155, AccessControl {
         _burnBatch(owner, stakeRequest.queueSplitRanges, vars.splitRangeValues);
         _mintBatch(owner, stakeRequest.requeueRangesStart, vars.requeueValues, "");
         stGlyph.mintBatch(owner, stakeRequest.stakeRangesStart, vars.stakeValues, "");
+    }
+
+    /// @dev Extend existing transfer logic to keep track of account total balances in accordance to `tokenId` -> `value`, where each value in the range represents a single token.
+    function _update(address from, address to, uint256[] memory ids, uint256[] memory values)
+        internal
+        virtual
+        override
+    {
+        super._update(from, to, ids, values);
+
+        if (from == address(0)) {
+            unchecked {
+                uint256 totalMintValue;
+                for (uint256 i; i < ids.length; ++i) {
+                    uint256 value = values.unsafeMemoryAccess(i);
+                    totalMintValue += value;
+                }
+                _balances[to] += totalMintValue;
+            }
+        }
+
+        if (to == address(0)) {
+            unchecked {
+                uint256 totalBurnValue;
+                for (uint256 i; i < ids.length; ++i) {
+                    uint256 value = values.unsafeMemoryAccess(i);
+                    totalBurnValue += value;
+                }
+                _balances[from] -= totalBurnValue;
+            }
+        }
     }
 
     /// @dev See {IERC165-supportsInterface}.

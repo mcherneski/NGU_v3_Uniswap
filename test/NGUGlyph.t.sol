@@ -20,9 +20,14 @@ contract NGUGlyphTest is Test {
         glyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(this));
     }
 
+    function test_createGlyphs_amount_0_fail() public {
+        vm.expectRevert(NGUGlyph.AmountMustBePositive.selector);
+        glyph.createGlyphs(alice.addr, 0, "");
+    }
+
     function test_createGlyphs_autoIncrementID(uint256 aliceAmount, uint256 bobAmount) public {
-        vm.assume(aliceAmount < 50 ether);
-        vm.assume(bobAmount < 50 ether);
+        vm.assume(aliceAmount > 0 && aliceAmount < 50 ether);
+        vm.assume(bobAmount > 0 && bobAmount < 50 ether);
 
         uint256 tokenId;
 
@@ -64,6 +69,18 @@ contract NGUGlyphTest is Test {
 
         assertEq(aliceTokenStart[0], 1, "aliceTokenStart[0] should be 1");
         assertEq(aliceTokenEnd[0], 135, "aliceTokenEnd[0] should be 135");
+    }
+
+    function test_createGlyphs_trackAccountTotalBalance(uint256[5] calldata mintAmounts) public {
+        uint256 totalBalance;
+        for (uint256 i; i < mintAmounts.length; i++) {
+            vm.assume(mintAmounts[i] > 0 && mintAmounts[i] < 50 ether);
+
+            glyph.createGlyphs(alice.addr, mintAmounts[i], "");
+            totalBalance += mintAmounts[i];
+
+            assertEq(glyph.balanceOf(alice.addr), totalBalance, "alice overall balance not correct");
+        }
     }
 
     function test_stakeGlyphs_success() public {
