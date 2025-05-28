@@ -5,52 +5,48 @@ import {console} from "forge-std/Test.sol";
 
 library LinkedListQueue {
     struct Node {
-        uint128 prev;
-        uint128 next;
+        uint256 prev;
+        uint256 next;
     }
 
     struct Queue {
         mapping(uint256 => Node) nodes;
-        uint128 head;
-        uint128 tail;
-        uint128 length;
+        uint256 head;
+        uint256 tail;
+        uint256 length;
     }
 
     /// @notice Error for token that does not exist.
     /// @param id The id of the non-existent token.
-    error TokenDoesNotExist(uint128 id);
+    error TokenDoesNotExist(uint256 id);
 
     /// @notice Error for invalid id (0).
     /// @param id The invalid id.
-    error InvalidId(uint128 id);
+    error InvalidId(uint256 id);
 
     /// @notice Error for id already in use.
     /// @param id The id that is already in use.
-    error IdAlreadyUsed(uint128 id);
-
-    /// @notice Error for id not in queue.
-    /// @param id The id that is not in the queue.
-    error IdNotInQueue(uint128 id);
+    error IdAlreadyUsed(uint256 id);
 
     /// @notice Error for cursor that does not exist.
     /// @param id The id of the non-existent cursor.
-    error CursorDoesNotExist(uint128 id);
+    error CursorDoesNotExist(uint256 id);
 
     /// @notice Checks if _id is in the queue.
-    function exists(Queue storage q, uint128 _id) internal view returns (bool) {
+    function exists(Queue storage q, uint256 _id) internal view returns (bool) {
         return q.nodes[_id].prev != 0 || q.nodes[_id].next != 0 || _id == q.head || _id == q.tail;
     }
 
     /// @notice Returns the node with _id in O(1).
     /// @dev Reverts if _id is not in the queue.
-    function at(Queue storage q, uint128 _id) internal view returns (Node storage n) {
+    function at(Queue storage q, uint256 _id) internal view returns (Node storage n) {
         require(exists(q, _id), TokenDoesNotExist(_id));
         n = q.nodes[_id];
     }
 
     /// @notice Pushes a new node to the front.
     /// @dev Reverts if _id is zero or already in use.
-    function pushFront(Queue storage q, uint128 _id) internal {
+    function pushFront(Queue storage q, uint256 _id) internal {
         require(_id != 0, InvalidId(_id));
         require(!exists(q, _id), IdAlreadyUsed(_id));
 
@@ -70,7 +66,7 @@ library LinkedListQueue {
 
     /// @notice Pushes a new node to the back.
     /// @dev Reverts if _id is zero or already in use.
-    function pushBack(Queue storage q, uint128 _id) internal {
+    function pushBack(Queue storage q, uint256 _id) internal {
         require(_id != 0, InvalidId(_id));
         require(!exists(q, _id), IdAlreadyUsed(_id));
 
@@ -90,7 +86,7 @@ library LinkedListQueue {
 
     /// @notice Inserts a new node immediately before an existing node _cursor.
     /// @dev Reverts if _id is zero or already used, or if _cursor doesn't exist.
-    function insertBefore(Queue storage q, uint128 _cursor, uint128 _id) internal {
+    function insertBefore(Queue storage q, uint256 _cursor, uint256 _id) internal {
         require(exists(q, _cursor), CursorDoesNotExist(_cursor));
         require(_id != 0, InvalidId(_id));
         require(!exists(q, _id), IdAlreadyUsed(_id));
@@ -114,7 +110,7 @@ library LinkedListQueue {
 
     /// @notice Inserts a new node immediately after an existing node _cursor.
     /// @dev Reverts if _id is zero or already used, or if _cursor doesn't exist.
-    function insertAfter(Queue storage q, uint128 _cursor, uint128 _id) internal {
+    function insertAfter(Queue storage q, uint256 _cursor, uint256 _id) internal {
         require(exists(q, _cursor), CursorDoesNotExist(_cursor));
         require(_id != 0, InvalidId(_id));
         require(!exists(q, _id), IdAlreadyUsed(_id));
@@ -138,10 +134,8 @@ library LinkedListQueue {
 
     /// @notice Removes the node with id `_id` in O(1).
     /// @dev Reverts if queue is empty or `_id` is invalid.
-    function remove(Queue storage q, uint128 _id) internal {
-        require(q.length > 0, IdNotInQueue(_id));
-
-        Node storage n = at(q, _id);
+    function remove(Queue storage q, uint256 _id) internal returns (Node memory n) {
+        n = at(q, _id);
 
         // unlink
         if (n.prev != 0) {

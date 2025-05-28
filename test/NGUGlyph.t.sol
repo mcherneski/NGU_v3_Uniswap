@@ -4,6 +4,7 @@ pragma solidity ^0.8.13;
 import {Test, Vm, console} from "forge-std/Test.sol";
 
 import {NGUGlyph} from "../src/NGUGlyph.sol";
+import {LinkedListQueue} from "../src/libraries/LinkedListQueue.sol";
 import {GlyphTestHelpers} from "./utils/GlyphTestHelpers.sol";
 
 contract NGUGlyphTest is Test {
@@ -19,14 +20,18 @@ contract NGUGlyphTest is Test {
         glyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(this));
     }
 
-    function test_createGlyphs_autoIncrementID() public {
-        uint128 tokenId;
+    function test_createGlyphs_autoIncrementID(uint256 aliceAmount, uint256 bobAmount) public {
+        vm.assume(aliceAmount < 50 ether);
+        vm.assume(bobAmount < 50 ether);
 
-        tokenId = glyph.createGlyphs(alice.addr, 100, "");
-        assertEq(tokenId, 1, "token id should be 1");
+        uint256 tokenId;
 
-        tokenId = glyph.createGlyphs(bob.addr, 100, "");
-        assertEq(tokenId, 101, "token id should be 101");
+        // first mint
+        tokenId = glyph.createGlyphs(alice.addr, aliceAmount, "");
+        assertEq(tokenId, 1, "alice token id should be 1");
+
+        tokenId = glyph.createGlyphs(bob.addr, bobAmount, "");
+        assertEq(tokenId, aliceAmount + 1, "bob token id should be the next after alice");
     }
 
     function test_createGlyphs_addToQueueAlternating() public {
@@ -34,7 +39,7 @@ contract NGUGlyphTest is Test {
         glyph.createGlyphs(bob.addr, 20, "");
         glyph.createGlyphs(alice.addr, 35, "");
 
-        (uint128[] memory aliceTokenStart, uint128[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
+        (uint256[] memory aliceTokenStart, uint256[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
         assertEq(aliceTokenStart.length, 2, "alice queue length should be 2");
 
         assertEq(aliceTokenStart[0], 1, "aliceTokenStart[0] should be 1");
@@ -43,7 +48,7 @@ contract NGUGlyphTest is Test {
         assertEq(aliceTokenStart[1], 121, "aliceTokenStart[1] should be 121");
         assertEq(aliceTokenEnd[1], 155, "aliceTokenEnd[1] should be 155");
 
-        (uint128[] memory bobTokenStart, uint128[] memory bobTokenEnd) = glyph.userTokenQueue(bob.addr);
+        (uint256[] memory bobTokenStart, uint256[] memory bobTokenEnd) = glyph.userTokenQueue(bob.addr);
         assertEq(bobTokenStart.length, 1, "bob queue length should be 1");
 
         assertEq(bobTokenStart[0], 101, "bobTokenStart[0] should be 101");
@@ -54,34 +59,51 @@ contract NGUGlyphTest is Test {
         glyph.createGlyphs(alice.addr, 100, "");
         glyph.createGlyphs(alice.addr, 35, "");
 
-        (uint128[] memory aliceTokenStart, uint128[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
+        (uint256[] memory aliceTokenStart, uint256[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
         assertEq(aliceTokenStart.length, 1, "alice queue length should be 1");
 
         assertEq(aliceTokenStart[0], 1, "aliceTokenStart[0] should be 1");
         assertEq(aliceTokenEnd[0], 135, "aliceTokenEnd[0] should be 135");
     }
 
-    function test_dequeueGlyphsAndStake_success() public {
+    function test_stakeGlyphs_success() public {
         glyph.createGlyphs(alice.addr, 120, "");
 
-        NGUGlyph.RemoveQueueRequest[] memory requests = new NGUGlyph.RemoveQueueRequest[](1);
+        NGUGlyph.StakeRequest memory request;
 
-        requests[0].id = 1;
-        requests[0].ranges = new NGUGlyph.Range[](3);
+        request.queueSplitRanges = new uint256[](1);
+        request.queueSplitRanges[0] = 1;
 
-        requests[0].ranges[0].start = 2;
-        requests[0].ranges[0].end = 2;
+        request.requeueRangeCount = new uint256[](1);
+        request.requeueRangeCount[0] = 3;
 
-        requests[0].ranges[1].start = 81;
-        requests[0].ranges[1].end = 100;
+        request.requeueRangesStart = new uint256[](3);
+        request.requeueRangesStart[0] = 1;
+        request.requeueRangesStart[1] = 3;
+        request.requeueRangesStart[2] = 112;
 
-        requests[0].ranges[2].start = 101;
-        requests[0].ranges[2].end = 111;
+        request.requeueRangesEnd = new uint256[](3);
+        request.requeueRangesEnd[0] = 1;
+        request.requeueRangesEnd[1] = 80;
+        request.requeueRangesEnd[2] = 120;
+
+        request.stakeRangeCount = new uint256[](1);
+        request.stakeRangeCount[0] = 3;
+
+        request.stakeRangesStart = new uint256[](3);
+        request.stakeRangesStart[0] = 2;
+        request.stakeRangesStart[1] = 81;
+        request.stakeRangesStart[2] = 101;
+
+        request.stakeRangesEnd = new uint256[](3);
+        request.stakeRangesEnd[0] = 2;
+        request.stakeRangesEnd[1] = 100;
+        request.stakeRangesEnd[2] = 111;
 
         vm.prank(alice.addr);
-        glyph.dequeueGlyphsAndStake(requests);
+        glyph.stakeGlyphs(request);
 
-        (uint128[] memory tokenStart, uint128[] memory tokenEnd) = glyph.userTokenQueue(alice.addr);
+        (uint256[] memory tokenStart, uint256[] memory tokenEnd) = glyph.userTokenQueue(alice.addr);
         assertEq(tokenStart.length, 3, "tokenStart length should be 3");
 
         assertEq(tokenStart[0], 1, "tokenStart[0] ID should be 1");
@@ -107,149 +129,314 @@ contract NGUGlyphTest is Test {
         assertEq(thisBalances[2], 11, "staked balance of ID 101 should be 11");
     }
 
-    function test_dequeueGlyphsAndStake_emptyRequest() public {
+    function test_stakeGlyphs_emptyRequest() public {
         glyph.createGlyphs(alice.addr, 120, "");
 
-        NGUGlyph.RemoveQueueRequest[] memory requests = new NGUGlyph.RemoveQueueRequest[](0);
+        NGUGlyph.StakeRequest memory request;
 
-        vm.expectRevert(NGUGlyph.DequeueRequestEmpty.selector);
-        glyph.dequeueGlyphsAndStake(requests);
+        vm.expectRevert(NGUGlyph.StakeRequestEmpty.selector);
+        glyph.stakeGlyphs(request);
     }
 
-    function test_dequeueGlyphsAndStake_emptyRequestRange() public {
+    function test_stakeGlyphs_emptyRequestRange() public {
         glyph.createGlyphs(alice.addr, 120, "");
 
-        NGUGlyph.RemoveQueueRequest[] memory requests = new NGUGlyph.RemoveQueueRequest[](1);
+        NGUGlyph.StakeRequest memory request;
 
-        requests[0].id = 1;
-        requests[0].ranges = new NGUGlyph.Range[](0);
-
-        vm.expectRevert(abi.encodeWithSelector(NGUGlyph.DequeueRequestRangeEmpty.selector, requests[0].id));
-        vm.prank(alice.addr);
-        glyph.dequeueGlyphsAndStake(requests);
-    }
-
-    function test_dequeueGlyphsAndStake_invalidQueueBalance() public {
-        glyph.createGlyphs(alice.addr, 120, "");
-
-        NGUGlyph.RemoveQueueRequest[] memory requests = new NGUGlyph.RemoveQueueRequest[](1);
-
-        requests[0].id = 2;
-        requests[0].ranges = new NGUGlyph.Range[](1);
-
-        requests[0].ranges[0].start = 11;
-        requests[0].ranges[0].end = 20;
-
-        vm.expectRevert(abi.encodeWithSelector(NGUGlyph.InvalidUserQueueToken.selector, alice.addr, requests[0].id));
-        vm.prank(alice.addr);
-        glyph.dequeueGlyphsAndStake(requests);
-    }
-
-    function test_dequeueGlyphsAndStake_invalidRange() public {
-        glyph.createGlyphs(alice.addr, 120, "");
-
-        NGUGlyph.RemoveQueueRequest[] memory requests = new NGUGlyph.RemoveQueueRequest[](1);
-
-        requests[0].id = 1;
-        requests[0].ranges = new NGUGlyph.Range[](1);
-
-        requests[0].ranges[0].start = 10;
-        requests[0].ranges[0].end = 5;
+        request.queueSplitRanges = new uint256[](1);
+        request.queueSplitRanges[0] = 1;
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                NGUGlyph.InvalidRange.selector, requests[0].id, requests[0].ranges[0].start, requests[0].ranges[0].end
-            )
+            abi.encodeWithSelector(NGUGlyph.ArrayLengthMismatch.selector, "queueSplitRanges", "requeueRangeCount", 1, 0)
         );
         vm.prank(alice.addr);
-        glyph.dequeueGlyphsAndStake(requests);
+        glyph.stakeGlyphs(request);
     }
 
-    function test_dequeueGlyphsAndStake_subRangeOutOfBounds() public {
+    function test_stakeGlyphs_invalidQueueBalance() public {
+        glyph.createGlyphs(alice.addr, 120, "");
+
+        NGUGlyph.StakeRequest memory request;
+
+        request.queueSplitRanges = new uint256[](1);
+        request.queueSplitRanges[0] = 2;
+
+        request.requeueRangeCount = new uint256[](1);
+        request.requeueRangeCount[0] = 0;
+
+        request.stakeRangeCount = new uint256[](1);
+        request.stakeRangeCount[0] = 0;
+
+        vm.expectRevert(abi.encodeWithSelector(LinkedListQueue.TokenDoesNotExist.selector, 2));
+        vm.prank(alice.addr);
+        glyph.stakeGlyphs(request);
+    }
+
+    function test_stakeGlyphs_invalidRange() public {
+        glyph.createGlyphs(alice.addr, 120, "");
+
+        NGUGlyph.StakeRequest memory request;
+
+        request.queueSplitRanges = new uint256[](1);
+        request.queueSplitRanges[0] = 1;
+
+        // Scenario 1
+
+        request.requeueRangeCount = new uint256[](1);
+        request.requeueRangeCount[0] = 1;
+
+        request.requeueRangesStart = new uint256[](1);
+        request.requeueRangesStart[0] = 15;
+
+        request.requeueRangesEnd = new uint256[](1);
+        request.requeueRangesEnd[0] = 11;
+
+        request.stakeRangeCount = new uint256[](1);
+
+        vm.expectRevert(abi.encodeWithSelector(NGUGlyph.InvalidRange.selector, NGUGlyph.RangeType.REQUEUE, 15, 11));
+        vm.prank(alice.addr);
+        glyph.stakeGlyphs(request);
+
+        // Scenario 2
+
+        request.requeueRangeCount = new uint256[](1);
+        request.requeueRangesStart = new uint256[](0);
+        request.requeueRangesEnd = new uint256[](0);
+
+        request.stakeRangeCount = new uint256[](1);
+        request.stakeRangeCount[0] = 1;
+
+        request.stakeRangesStart = new uint256[](1);
+        request.stakeRangesStart[0] = 10;
+
+        request.stakeRangesEnd = new uint256[](1);
+        request.stakeRangesEnd[0] = 5;
+
+        vm.expectRevert(abi.encodeWithSelector(NGUGlyph.InvalidRange.selector, NGUGlyph.RangeType.STAKE, 10, 5));
+        vm.prank(alice.addr);
+        glyph.stakeGlyphs(request);
+    }
+
+    function test_stakeGlyphs_subRangeOutOfBounds() public {
         glyph.createGlyphs(alice.addr, 10, ""); // 1 -> 10
         glyph.createGlyphs(bob.addr, 110, ""); // 11 -> 120
 
-        NGUGlyph.RemoveQueueRequest[] memory requests = new NGUGlyph.RemoveQueueRequest[](1);
+        NGUGlyph.StakeRequest memory request;
 
-        requests[0].id = 11;
-        requests[0].ranges = new NGUGlyph.Range[](1);
+        request.queueSplitRanges = new uint256[](1);
+        request.queueSplitRanges[0] = 11;
+
+        request.requeueRangeCount = new uint256[](1);
+        request.requeueRangeCount[0] = 1;
+        request.requeueRangesStart = new uint256[](1);
+        request.requeueRangesEnd = new uint256[](1);
+
+        request.stakeRangeCount = new uint256[](1);
+        request.stakeRangeCount[0] = 1;
+        request.stakeRangesStart = new uint256[](1);
+        request.stakeRangesEnd = new uint256[](1);
 
         // scenario 1
-        _dequeueGlyphsAndStake_subRangeOutOfBounds(bob.addr, requests, 1, 2);
+        _stakeGlyphs_rangeOutOfBounds(
+            bob.addr,
+            request,
+            1,
+            2,
+            3,
+            120,
+            abi.encodeWithSelector(NGUGlyph.RangeOutOfBounds.selector, NGUGlyph.RangeType.REQUEUE, 11, 120, 1, 2)
+        );
 
         // scenario 2
-        _dequeueGlyphsAndStake_subRangeOutOfBounds(bob.addr, requests, 5, 20);
+        _stakeGlyphs_rangeOutOfBounds(
+            bob.addr,
+            request,
+            5,
+            20,
+            21,
+            120,
+            abi.encodeWithSelector(NGUGlyph.RangeOutOfBounds.selector, NGUGlyph.RangeType.REQUEUE, 11, 120, 5, 20)
+        );
 
         // scenario 3
-        _dequeueGlyphsAndStake_subRangeOutOfBounds(bob.addr, requests, 100, 130);
+        _stakeGlyphs_rangeOutOfBounds(
+            bob.addr,
+            request,
+            100,
+            130,
+            11,
+            99,
+            abi.encodeWithSelector(NGUGlyph.RangeOutOfBounds.selector, NGUGlyph.RangeType.REQUEUE, 11, 120, 100, 130)
+        );
 
         // scenario 4
-        _dequeueGlyphsAndStake_subRangeOutOfBounds(bob.addr, requests, 121, 130);
-    }
-
-    function _dequeueGlyphsAndStake_subRangeOutOfBounds(
-        address user,
-        NGUGlyph.RemoveQueueRequest[] memory requests,
-        uint128 start,
-        uint128 end
-    ) internal {
-        requests[0].ranges[0].start = start;
-        requests[0].ranges[0].end = end;
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                NGUGlyph.SubRangeOutOfBounds.selector,
-                requests[0].id,
-                glyph.userQueueRangeEnd(user, requests[0].id),
-                requests[0].ranges[0].start,
-                requests[0].ranges[0].end
-            )
+        _stakeGlyphs_rangeOutOfBounds(
+            bob.addr,
+            request,
+            121,
+            130,
+            11,
+            120,
+            abi.encodeWithSelector(NGUGlyph.RangeOutOfBounds.selector, NGUGlyph.RangeType.REQUEUE, 11, 120, 121, 130)
         );
-        vm.prank(user);
-        glyph.dequeueGlyphsAndStake(requests);
+
+        // scenario 5
+        _stakeGlyphs_rangeOutOfBounds(
+            bob.addr,
+            request,
+            21,
+            51,
+            3,
+            5,
+            abi.encodeWithSelector(NGUGlyph.RangeOutOfBounds.selector, NGUGlyph.RangeType.STAKE, 11, 120, 3, 5)
+        );
+
+        // scenario 6
+        _stakeGlyphs_rangeOutOfBounds(
+            bob.addr,
+            request,
+            51,
+            120,
+            7,
+            20,
+            abi.encodeWithSelector(NGUGlyph.RangeOutOfBounds.selector, NGUGlyph.RangeType.STAKE, 11, 120, 7, 20)
+        );
+
+        // scenario 7
+        _stakeGlyphs_rangeOutOfBounds(
+            bob.addr,
+            request,
+            100,
+            111,
+            112,
+            121,
+            abi.encodeWithSelector(NGUGlyph.RangeOutOfBounds.selector, NGUGlyph.RangeType.STAKE, 11, 120, 112, 121)
+        );
+
+        // scenario 8
+        _stakeGlyphs_rangeOutOfBounds(
+            bob.addr,
+            request,
+            100,
+            110,
+            125,
+            130,
+            abi.encodeWithSelector(NGUGlyph.RangeOutOfBounds.selector, NGUGlyph.RangeType.STAKE, 11, 120, 125, 130)
+        );
     }
 
-    function test_dequeueGlyphsAndStake_subRangesNotSequential() public {
+    function _stakeGlyphs_rangeOutOfBounds(
+        address user,
+        NGUGlyph.StakeRequest memory request,
+        uint256 requeueStart,
+        uint256 requeueEnd,
+        uint256 stakeStart,
+        uint256 stakeEnd,
+        bytes memory expectedError
+    ) internal {
+        request.requeueRangesStart[0] = requeueStart;
+        request.requeueRangesEnd[0] = requeueEnd;
+
+        request.stakeRangesStart[0] = stakeStart;
+        request.stakeRangesEnd[0] = stakeEnd;
+
+        vm.expectRevert(expectedError);
+        vm.prank(user);
+        glyph.stakeGlyphs(request);
+    }
+
+    function test_stakeGlyphs_rangesNotSequential() public {
         glyph.createGlyphs(alice.addr, 120, "");
 
-        NGUGlyph.RemoveQueueRequest[] memory requests = new NGUGlyph.RemoveQueueRequest[](1);
+        NGUGlyph.StakeRequest memory request;
 
-        requests[0].id = 1;
-        requests[0].ranges = new NGUGlyph.Range[](2);
+        request.queueSplitRanges = new uint256[](1);
+        request.queueSplitRanges[0] = 1;
 
         // scenario 1
 
-        requests[0].ranges[0].start = 11;
-        requests[0].ranges[0].end = 20;
+        request.requeueRangeCount = new uint256[](1);
+        request.requeueRangeCount[0] = 2;
 
-        requests[0].ranges[1].start = 4;
-        requests[0].ranges[1].end = 8;
+        request.requeueRangesStart = new uint256[](2);
+        request.requeueRangesStart[0] = 11;
+        request.requeueRangesStart[1] = 1;
 
-        _dequeueGlyphsAndStake_subRangesNotSequential(alice.addr, requests);
+        request.requeueRangesEnd = new uint256[](2);
+        request.requeueRangesEnd[0] = 120;
+        request.requeueRangesEnd[1] = 10;
+
+        // reset
+        request.stakeRangeCount = new uint256[](1);
+
+        _stakeGlyphs_rangesNotSequential(alice.addr, request, NGUGlyph.RangeType.REQUEUE);
 
         // scenario 2
 
-        requests[0].ranges[0].start = 11;
-        requests[0].ranges[0].end = 20;
+        request.requeueRangeCount = new uint256[](1);
+        request.requeueRangeCount[0] = 2;
 
-        requests[0].ranges[1].start = 20;
-        requests[0].ranges[1].end = 30;
+        request.requeueRangesStart = new uint256[](2);
+        request.requeueRangesStart[0] = 1;
+        request.requeueRangesStart[1] = 20;
 
-        _dequeueGlyphsAndStake_subRangesNotSequential(alice.addr, requests);
+        request.requeueRangesEnd = new uint256[](2);
+        request.requeueRangesEnd[0] = 21;
+        request.requeueRangesEnd[1] = 120;
+
+        // reset
+        request.stakeRangeCount = new uint256[](1);
+
+        _stakeGlyphs_rangesNotSequential(alice.addr, request, NGUGlyph.RangeType.REQUEUE);
+
+        // scenario 3
+
+        // reset
+        request.requeueRangeCount = new uint256[](1);
+        request.requeueRangesStart = new uint256[](0);
+        request.requeueRangesEnd = new uint256[](0);
+
+        request.stakeRangeCount = new uint256[](1);
+        request.stakeRangeCount[0] = 2;
+
+        request.stakeRangesStart = new uint256[](2);
+        request.stakeRangesStart[0] = 9;
+        request.stakeRangesStart[1] = 1;
+
+        request.stakeRangesEnd = new uint256[](2);
+        request.stakeRangesEnd[0] = 120;
+        request.stakeRangesEnd[1] = 8;
+
+        _stakeGlyphs_rangesNotSequential(alice.addr, request, NGUGlyph.RangeType.STAKE);
+
+        // scenario 4
+
+        // reset
+        request.requeueRangeCount = new uint256[](1);
+        request.requeueRangesStart = new uint256[](0);
+        request.requeueRangesEnd = new uint256[](0);
+
+        request.stakeRangeCount = new uint256[](1);
+        request.stakeRangeCount[0] = 2;
+
+        request.stakeRangesStart = new uint256[](2);
+        request.stakeRangesStart[0] = 1;
+        request.stakeRangesStart[1] = 20;
+
+        request.stakeRangesEnd = new uint256[](2);
+        request.stakeRangesEnd[0] = 21;
+        request.stakeRangesEnd[1] = 120;
+
+        _stakeGlyphs_rangesNotSequential(alice.addr, request, NGUGlyph.RangeType.STAKE);
     }
 
-    function _dequeueGlyphsAndStake_subRangesNotSequential(address user, NGUGlyph.RemoveQueueRequest[] memory requests)
-        internal
-    {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                NGUGlyph.SubRangesNotSequential.selector,
-                requests[0].id,
-                requests[0].ranges[0].end + 1,
-                requests[0].ranges[1].start
-            )
-        );
+    function _stakeGlyphs_rangesNotSequential(
+        address user,
+        NGUGlyph.StakeRequest memory request,
+        NGUGlyph.RangeType rangeType
+    ) internal {
+        vm.expectRevert(abi.encodeWithSelector(NGUGlyph.RangesNotSequential.selector, rangeType));
         vm.prank(user);
-        glyph.dequeueGlyphsAndStake(requests);
+        glyph.stakeGlyphs(request);
     }
 }
