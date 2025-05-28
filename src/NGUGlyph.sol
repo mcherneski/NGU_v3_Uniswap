@@ -13,6 +13,12 @@ import {NGUStakedGlyph} from "./NGUStakedGlyph.sol";
 /// @dev The underlying balance mapping (`tokenId` -> `value`) represents a range, where each value within that range
 ///  represents a single token.
 ///
+///  Balance mapping (`tokenId` -> `value`) = Token range [`rangeStart` -> `numTokensInRange`]
+///  Examples:
+///  - Range 1: [1 -> 5] = [`1`, `2`, `3`, `4`, `5`]
+///  - Range 2: [6 -> 10] = [`6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`]
+///  - Range 3: [16 -> 7] = [`16`, `17`, `18`, `19`, `20`, `21`, `22`]
+///
 ///  If you want to stake a single token, or sub-range of tokens, that are part of an existing range, you must split the
 ///  range into multiple smaller ranges of sequential token IDs. See {stakeGlyphs}
 contract NGUGlyph is ERC1155, AccessControl {
@@ -36,6 +42,8 @@ contract NGUGlyph is ERC1155, AccessControl {
 
     /// @dev Thrown when the amount to be minted is zero.
     error AmountMustBePositive();
+
+    error InsufficientGlyphBalance(uint256 needed, uint256 balance);
 
     /// @dev Thrown when a split request is empty.
     error SplitRequestEmpty();
@@ -143,6 +151,93 @@ contract NGUGlyph is ERC1155, AccessControl {
         return tokenId;
     }
 
+    /// @notice Burns glyphs from the front specified user's queue
+    /// @dev Only callable by addresses with the COMPTROLLER_ROLE
+    /// @param from The address that owns the glyphs to be burned
+    /// @param amount The amount of glyphs to burn
+    function burnGlyphs(address from, uint256 amount) external onlyRole(COMPTROLLER_ROLE) {
+        LinkedListQueue storage queue = _ownerQueue[from];
+
+        uint256 queueRangesCount;
+        uint256 requeueRangeStart;
+        uint256 requeueRangeEnd;
+        uint256 splitRangeStart;
+        uint256 splitRangeEnd;
+
+        uint256 removedCount;
+        uint256 cursor = queue.head;
+        while (removedCount < amount) {
+            if (cursor == 0) break;
+
+            uint256 tokensInRange = balanceOf(from, cursor);
+            uint256 amountToRemove = tokensInRange;
+            unchecked {
+                if (tokensInRange > amount - removedCount) {
+                    amountToRemove = amount - removedCount;
+
+                    splitRangeStart = cursor;
+                    splitRangeEnd = cursor + amountToRemove - 1;
+                    requeueRangeStart = cursor + amountToRemove;
+                    requeueRangeEnd = cursor + tokensInRange - 1;
+                }
+                removedCount += amountToRemove;
+                queueRangesCount++;
+            }
+
+            cursor = queue.at(cursor).next;
+        }
+
+        require(removedCount == amount, InsufficientGlyphBalance(amount, removedCount));
+
+        SplitRequest memory request;
+
+        request.queueRanges = new uint256[](queueRangesCount);
+        request.queueRanges[0] = queue.head;
+        for (uint256 i = 1; i < queueRangesCount;) {
+            request.queueRanges[i] = queue.at(request.queueRanges[i - 1]).next;
+            unchecked {
+                i++;
+            }
+        }
+
+        request.requeueRangeCount = new uint256[](queueRangesCount);
+
+        if (requeueRangeStart != 0) {
+            request.requeueRangeCount[queueRangesCount - 1] = 1;
+
+            request.requeueRangesStart = new uint256[](1);
+            request.requeueRangesStart[0] = requeueRangeStart;
+
+            request.requeueRangesEnd = new uint256[](1);
+            request.requeueRangesEnd[0] = requeueRangeEnd;
+        }
+
+        request.splitRangeCount = new uint256[](queueRangesCount);
+        request.splitRangeCount[queueRangesCount - 1] = 1;
+
+        request.splitRangesStart = new uint256[](queueRangesCount);
+        request.splitRangesStart[queueRangesCount - 1] = splitRangeStart;
+
+        request.splitRangesEnd = new uint256[](queueRangesCount);
+        request.splitRangesEnd[queueRangesCount - 1] = splitRangeEnd;
+
+        cursor = queue.head;
+        for (uint256 i = 0; i < queueRangesCount - 1;) {
+            request.splitRangeCount[i] = 1;
+            request.splitRangesStart[i] = cursor;
+            request.splitRangesEnd[i] = cursor + balanceOf(from, cursor) - 1;
+            cursor = queue.at(cursor).next;
+            unchecked {
+                i++;
+            }
+        }
+
+        (uint256[] memory queueRangeValues, uint256[] memory requeueValues,) = _processSplitRequest(from, request);
+
+        _burnBatch(from, request.queueRanges, queueRangeValues);
+        _mintBatch(from, request.requeueRangesStart, requeueValues, "");
+    }
+
     /// @notice Checks if two token IDs can be merged into a single range
     /// @param user The address of the user
     /// @param rangeStart1 The first token ID
@@ -161,7 +256,7 @@ contract NGUGlyph is ERC1155, AccessControl {
     /// @param request Array of {SplitRequest}s containing the ranges in user's queue to split and stake
     function stakeGlyphs(SplitRequest memory request) external {
         (uint256[] memory queueRangeValues, uint256[] memory requeueValues, uint256[] memory splitValues) =
-            _processSplitRequest(request);
+            _processSplitRequest(_msgSender(), request);
 
         _burnBatch(_msgSender(), request.queueRanges, queueRangeValues);
         _mintBatch(_msgSender(), request.requeueRangesStart, requeueValues, "");
@@ -202,7 +297,7 @@ contract NGUGlyph is ERC1155, AccessControl {
 
     /// @notice Removes multiple token IDs from the user's queue and splits them
     /// @param request Array of {SplitRequest}s containing the ranges in user's queue to split and stake
-    function _processSplitRequest(SplitRequest memory request)
+    function _processSplitRequest(address account, SplitRequest memory request)
         internal
         returns (uint256[] memory queueRangeValues, uint256[] memory requeueValues, uint256[] memory splitValues)
     {
@@ -235,7 +330,7 @@ contract NGUGlyph is ERC1155, AccessControl {
             )
         );
 
-        LinkedListQueue storage queue = _ownerQueue[_msgSender()];
+        LinkedListQueue storage queue = _ownerQueue[account];
 
         SplitVars memory vars;
 
@@ -263,7 +358,7 @@ contract NGUGlyph is ERC1155, AccessControl {
                 totalRequeues += request.requeueRangeCount[vars.iQueue];
                 totalSplits += request.splitRangeCount[vars.iQueue];
 
-                vars.queueRangeValues[vars.iQueue++] = balanceOf(_msgSender(), splitStart);
+                vars.queueRangeValues[vars.iQueue++] = balanceOf(account, splitStart);
             }
         }
 
@@ -287,6 +382,12 @@ contract NGUGlyph is ERC1155, AccessControl {
 
         vars.iQueue = 0;
         for (uint256 iRequeue; iRequeue < request.requeueRangesStart.length;) {
+            if (request.requeueRangeCount[vars.iQueue] == 0) {
+                unchecked {
+                    vars.iQueue++;
+                }
+                continue;
+            }
             uint256 requeueCursor = vars.requeueCursors[vars.iQueue];
 
             uint256 rangeStart = request.requeueRangesStart[iRequeue];
@@ -324,6 +425,13 @@ contract NGUGlyph is ERC1155, AccessControl {
 
         vars.iQueue = 0;
         for (uint256 iSplit; iSplit < request.splitRangesStart.length;) {
+            if (request.splitRangeCount[vars.iQueue] == 0) {
+                unchecked {
+                    vars.iQueue++;
+                }
+                continue;
+            }
+
             uint256 rangeStart = request.splitRangesStart[iSplit];
             require(
                 iSplit == 0 || rangeStart > request.splitRangesEnd[iSplit - 1], RangesNotSequential(RangeType.SPLIT)

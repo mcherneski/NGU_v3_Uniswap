@@ -83,6 +83,17 @@ contract NGUGlyphTest is Test {
         }
     }
 
+    function test_burnGlyphs_success() public {
+        glyph.createGlyphs(alice.addr, 10, ""); // 1 -> 10
+        glyph.createGlyphs(bob.addr, 10, ""); // 11 -> 20
+        glyph.createGlyphs(alice.addr, 20, ""); // 21 -> 40
+
+        glyph.burnGlyphs(alice.addr, 15);
+
+        assertEq(glyph.balanceOf(alice.addr), 15, "alice overall balance not correct");
+        assertEq(glyph.balanceOf(alice.addr, 26), 15, "alice balance not correct");
+    }
+
     function test_stakeGlyphs_success() public {
         glyph.createGlyphs(alice.addr, 120, "");
 
