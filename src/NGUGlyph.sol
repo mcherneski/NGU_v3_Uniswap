@@ -32,14 +32,14 @@ contract NGUGlyph is ERC1155, AccessControl {
     enum RangeType {
         EXISTING,
         REQUEUE,
-        STAKE
+        SPLIT
     }
 
     /// @dev Thrown when the amount to be minted is zero.
     error AmountMustBePositive();
 
-    /// @dev Thrown when a stake request is empty.
-    error StakeRequestEmpty();
+    /// @dev Thrown when a split request is empty.
+    error SplitRequestEmpty();
 
     /// @dev Thrown when the lengths of two arrays are not equal.
     /// @param arr1 First array.
@@ -57,7 +57,7 @@ contract NGUGlyph is ERC1155, AccessControl {
     /// @dev Thrown when the splits given for requeuing and staking a range did not match exactly.
     /// @param existingQueueRangeStart Start of the existing queue range.
     /// @param existingQueueRangeValue Number of tokens in the existing queue range.
-    /// @param totalSplitValueGiven Total number of tokens given from requeue and stake splits.
+    /// @param totalSplitValueGiven Total number of tokens given from requeue and splits.
     error InvalidRangeSplits(
         uint256 existingQueueRangeStart, uint256 existingQueueRangeValue, uint256 totalSplitValueGiven
     );
@@ -158,151 +158,153 @@ contract NGUGlyph is ERC1155, AccessControl {
         return (rangeEnd1 != 0 && rangeEnd1 + 1 == rangeStart2) || (rangeEnd2 != 0 && rangeEnd2 + 1 == rangeStart1);
     }
 
-    struct StakeRequest {
-        // Queue range glyph IDs to burn and split
-        uint256[] queueSplitRanges;
-        // Number of glyph ranges in `requeueRanges` to remint from the split index in `queueSplitRanges`
-        // Length must match length of `queueSplitRanges`
-        uint256[] requeueRangeCount;
-        // Starting glyph IDs in new ranges to remint - must be subset of range in `queueSplitRanges`
-        uint256[] requeueRangesStart;
-        // Ending glyph IDs in new ranges to remint - must be subset of range in `queueSplitRanges`
-        uint256[] requeueRangesEnd;
-        // Number of glyph ranges in `stakeRanges` to stake from the split index in `queueSplitRanges`
-        // Length must match length of `queueSplitRanges`
-        uint256[] stakeRangeCount;
-        // Starting glyph IDs in ranges to stake - must be subset of range in `queueSplitRanges`
-        uint256[] stakeRangesStart;
-        // Ending glyph IDs in ranges to stake - must be subset of range in `queueSplitRanges`
-        uint256[] stakeRangesEnd;
+    /// @notice Removes multiple token IDs from the user's queue and splits them
+    /// @param request Array of {SplitRequest}s containing the ranges in user's queue to split and stake
+    function stakeGlyphs(SplitRequest memory request) external {
+        (uint256[] memory queueRangeValues, uint256[] memory requeueValues, uint256[] memory splitValues) =
+            _processSplitRequest(request);
+
+        _burnBatch(_msgSender(), request.queueRanges, queueRangeValues);
+        _mintBatch(_msgSender(), request.requeueRangesStart, requeueValues, "");
+        stGlyph.mintBatch(_msgSender(), request.splitRangesStart, splitValues, "");
     }
 
-    struct StakeVars {
+    struct SplitRequest {
+        // Queue range glyph IDs to split
+        uint256[] queueRanges;
+        // Number of glyph ranges in `requeueRanges` to remint from the split index in `queueRanges`
+        // Length must match length of `queueRanges`
+        uint256[] requeueRangeCount;
+        // Starting glyph IDs in new ranges to remint - must be subset of range in `queueRanges`
+        uint256[] requeueRangesStart;
+        // Ending glyph IDs in new ranges to remint - must be subset of range in `queueRanges`
+        uint256[] requeueRangesEnd;
+        // Number of glyph ranges in `splitRanges` to split from the split index in `queueRanges`
+        // Length must match length of `queueRanges`
+        uint256[] splitRangeCount;
+        // Starting glyph IDs in ranges to split - must be subset of range in `queueRanges`
+        uint256[] splitRangesStart;
+        // Ending glyph IDs in ranges to split - must be subset of range in `queueRanges`
+        uint256[] splitRangesEnd;
+    }
+
+    struct SplitVars {
         // Balance of existing glyph ranges in user's queue that are to be split
-        uint256[] splitRangeValues;
+        uint256[] queueRangeValues;
+        // Existing glyph range IDs of where to position new ranges in the queue
+        uint256[] requeueCursors;
         // Amount in each new glyph range to mint & requeue
         uint256[] requeueValues;
-        // Amount in each glyph range to stake
-        uint256[] stakeValues;
-        uint256[] splitRangesSum;
-        uint256[] requeueCursors;
-        uint256 iSplit;
+        // Amount in each glyph range to split
+        uint256[] splitValues;
+        uint256[] newRangesSum;
+        uint256 iQueue;
     }
 
-    /// @notice Removes multiple token IDs from the user's queue and stakes them
-    /// @param stakeRequest Array of requests containing the ranges in user's queue to split and stake
-    function stakeGlyphs(StakeRequest memory stakeRequest) external {
-        require(stakeRequest.queueSplitRanges.length > 0, StakeRequestEmpty());
+    /// @notice Removes multiple token IDs from the user's queue and splits them
+    /// @param request Array of {SplitRequest}s containing the ranges in user's queue to split and stake
+    function _processSplitRequest(SplitRequest memory request)
+        internal
+        returns (uint256[] memory queueRangeValues, uint256[] memory requeueValues, uint256[] memory splitValues)
+    {
+        require(request.queueRanges.length > 0, SplitRequestEmpty());
         require(
-            stakeRequest.queueSplitRanges.length == stakeRequest.requeueRangeCount.length,
+            request.queueRanges.length == request.requeueRangeCount.length,
             ArrayLengthMismatch(
-                "queueSplitRanges",
-                "requeueRangeCount",
-                stakeRequest.queueSplitRanges.length,
-                stakeRequest.requeueRangeCount.length
+                "queueRanges", "requeueRangeCount", request.queueRanges.length, request.requeueRangeCount.length
             )
         );
         require(
-            stakeRequest.queueSplitRanges.length == stakeRequest.stakeRangeCount.length,
+            request.queueRanges.length == request.splitRangeCount.length,
             ArrayLengthMismatch(
-                "queueSplitRanges",
-                "stakeRangeCount",
-                stakeRequest.queueSplitRanges.length,
-                stakeRequest.stakeRangeCount.length
+                "queueRanges", "splitRangeCount", request.queueRanges.length, request.splitRangeCount.length
             )
         );
         require(
-            stakeRequest.requeueRangesStart.length == stakeRequest.requeueRangesEnd.length,
+            request.requeueRangesStart.length == request.requeueRangesEnd.length,
             ArrayLengthMismatch(
                 "requeueRangesStart",
                 "requeueRangesEnd",
-                stakeRequest.requeueRangesStart.length,
-                stakeRequest.requeueRangesEnd.length
+                request.requeueRangesStart.length,
+                request.requeueRangesEnd.length
             )
         );
         require(
-            stakeRequest.stakeRangesStart.length == stakeRequest.stakeRangesEnd.length,
+            request.splitRangesStart.length == request.splitRangesEnd.length,
             ArrayLengthMismatch(
-                "stakeRangesStart",
-                "stakeRangesEnd",
-                stakeRequest.stakeRangesStart.length,
-                stakeRequest.stakeRangesEnd.length
+                "splitRangesStart", "splitRangesEnd", request.splitRangesStart.length, request.splitRangesEnd.length
             )
         );
 
-        address owner = _msgSender();
-        LinkedListQueue.Queue storage queue = _ownerQueue[owner];
+        LinkedListQueue.Queue storage queue = _ownerQueue[_msgSender()];
 
-        StakeVars memory vars;
+        SplitVars memory vars;
 
         // Balance of existing glyph ranges in user's queue that are to be split
-        vars.splitRangeValues = new uint256[](stakeRequest.queueSplitRanges.length);
+        vars.queueRangeValues = new uint256[](request.queueRanges.length);
         // Amount in each new glyph range to mint & requeue
-        vars.requeueValues = new uint256[](stakeRequest.requeueRangesStart.length);
-        // Amount in each glyph range to stake
-        vars.stakeValues = new uint256[](stakeRequest.stakeRangesStart.length);
+        vars.requeueValues = new uint256[](request.requeueRangesStart.length);
+        // Amount in each glyph range to split
+        vars.splitValues = new uint256[](request.splitRangesStart.length);
 
-        vars.requeueCursors = new uint256[](stakeRequest.queueSplitRanges.length);
+        vars.requeueCursors = new uint256[](request.queueRanges.length);
 
-        uint256 totalRequeueSplits;
-        uint256 totalStakeSplits;
-        while (vars.iSplit < stakeRequest.queueSplitRanges.length) {
-            uint256 splitStart = stakeRequest.queueSplitRanges[vars.iSplit];
+        uint256 totalRequeues;
+        uint256 totalSplits;
+        while (vars.iQueue < request.queueRanges.length) {
+            uint256 splitStart = request.queueRanges[vars.iQueue];
             require(
-                vars.iSplit == 0 || splitStart > stakeRequest.queueSplitRanges[vars.iSplit - 1],
+                vars.iQueue == 0 || splitStart > request.queueRanges[vars.iQueue - 1],
                 RangesNotSequential(RangeType.EXISTING)
             );
 
-            vars.requeueCursors[vars.iSplit] = queue.remove(splitStart).next;
+            vars.requeueCursors[vars.iQueue] = queue.remove(splitStart).next;
 
             unchecked {
-                totalRequeueSplits += stakeRequest.requeueRangeCount[vars.iSplit];
-                totalStakeSplits += stakeRequest.stakeRangeCount[vars.iSplit];
+                totalRequeues += request.requeueRangeCount[vars.iQueue];
+                totalSplits += request.splitRangeCount[vars.iQueue];
 
-                vars.splitRangeValues[vars.iSplit++] = balanceOf(owner, splitStart);
+                vars.queueRangeValues[vars.iQueue++] = balanceOf(_msgSender(), splitStart);
             }
         }
 
         require(
-            totalRequeueSplits == stakeRequest.requeueRangesStart.length,
+            totalRequeues == request.requeueRangesStart.length,
             ArrayLengthMismatch(
                 "totalRequeueSplits",
-                "stakeRequest.requeueRangesStart",
-                totalRequeueSplits,
-                stakeRequest.requeueRangesStart.length
+                "splitRequest.requeueRangesStart",
+                totalRequeues,
+                request.requeueRangesStart.length
             )
         );
         require(
-            totalStakeSplits == stakeRequest.stakeRangesStart.length,
+            totalSplits == request.splitRangesStart.length,
             ArrayLengthMismatch(
-                "totalStakeSplits",
-                "stakeRequest.stakeRangesStart",
-                totalStakeSplits,
-                stakeRequest.stakeRangesStart.length
+                "totalSplits", "splitRequest.splitRangesStart", totalSplits, request.splitRangesStart.length
             )
         );
 
-        vars.splitRangesSum = new uint256[](stakeRequest.queueSplitRanges.length);
+        vars.newRangesSum = new uint256[](request.queueRanges.length);
 
-        vars.iSplit = 0;
-        for (uint256 iRequeue; iRequeue < stakeRequest.requeueRangesStart.length;) {
-            uint256 requeueCursor = vars.requeueCursors[vars.iSplit];
+        vars.iQueue = 0;
+        for (uint256 iRequeue; iRequeue < request.requeueRangesStart.length;) {
+            uint256 requeueCursor = vars.requeueCursors[vars.iQueue];
 
-            uint256 rangeStart = stakeRequest.requeueRangesStart[iRequeue];
+            uint256 rangeStart = request.requeueRangesStart[iRequeue];
             require(
-                iRequeue == 0 || rangeStart > stakeRequest.requeueRangesEnd[iRequeue - 1],
+                iRequeue == 0 || rangeStart > request.requeueRangesEnd[iRequeue - 1],
                 RangesNotSequential(RangeType.REQUEUE)
             );
 
-            uint256 rangeEnd = stakeRequest.requeueRangesEnd[iRequeue];
+            uint256 rangeEnd = request.requeueRangesEnd[iRequeue];
             require(rangeStart <= rangeEnd, InvalidRange(RangeType.REQUEUE, rangeStart, rangeEnd));
             require(
-                rangeStart >= stakeRequest.queueSplitRanges[vars.iSplit]
-                    && rangeEnd <= stakeRequest.queueSplitRanges[vars.iSplit] + vars.splitRangeValues[vars.iSplit] - 1,
+                rangeStart >= request.queueRanges[vars.iQueue]
+                    && rangeEnd <= request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
                 RangeOutOfBounds(
                     RangeType.REQUEUE,
-                    stakeRequest.queueSplitRanges[vars.iSplit],
-                    stakeRequest.queueSplitRanges[vars.iSplit] + vars.splitRangeValues[vars.iSplit] - 1,
+                    request.queueRanges[vars.iQueue],
+                    request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
                     rangeStart,
                     rangeEnd
                 )
@@ -312,32 +314,31 @@ contract NGUGlyph is ERC1155, AccessControl {
 
             unchecked {
                 uint256 value = rangeEnd - rangeStart + 1;
-                vars.splitRangesSum[vars.iSplit] -= value;
+                vars.newRangesSum[vars.iQueue] -= value;
                 vars.requeueValues[iRequeue] = value;
 
-                if (iRequeue++ + 1 % stakeRequest.requeueRangeCount[vars.iSplit] == 0) {
-                    vars.iSplit++;
+                if (iRequeue++ + 1 % request.requeueRangeCount[vars.iQueue] == 0) {
+                    vars.iQueue++;
                 }
             }
         }
 
-        vars.iSplit = 0;
-        for (uint256 iStake; iStake < stakeRequest.stakeRangesStart.length;) {
-            uint256 rangeStart = stakeRequest.stakeRangesStart[iStake];
+        vars.iQueue = 0;
+        for (uint256 iSplit; iSplit < request.splitRangesStart.length;) {
+            uint256 rangeStart = request.splitRangesStart[iSplit];
             require(
-                iStake == 0 || rangeStart > stakeRequest.stakeRangesEnd[iStake - 1],
-                RangesNotSequential(RangeType.STAKE)
+                iSplit == 0 || rangeStart > request.splitRangesEnd[iSplit - 1], RangesNotSequential(RangeType.SPLIT)
             );
 
-            uint256 rangeEnd = stakeRequest.stakeRangesEnd[iStake];
-            require(rangeStart <= rangeEnd, InvalidRange(RangeType.STAKE, rangeStart, rangeEnd));
+            uint256 rangeEnd = request.splitRangesEnd[iSplit];
+            require(rangeStart <= rangeEnd, InvalidRange(RangeType.SPLIT, rangeStart, rangeEnd));
             require(
-                rangeStart >= stakeRequest.queueSplitRanges[vars.iSplit]
-                    && rangeEnd <= stakeRequest.queueSplitRanges[vars.iSplit] + vars.splitRangeValues[vars.iSplit] - 1,
+                rangeStart >= request.queueRanges[vars.iQueue]
+                    && rangeEnd <= request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
                 RangeOutOfBounds(
-                    RangeType.STAKE,
-                    stakeRequest.queueSplitRanges[vars.iSplit],
-                    stakeRequest.queueSplitRanges[vars.iSplit] + vars.splitRangeValues[vars.iSplit] - 1,
+                    RangeType.SPLIT,
+                    request.queueRanges[vars.iQueue],
+                    request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
                     rangeStart,
                     rangeEnd
                 )
@@ -345,32 +346,30 @@ contract NGUGlyph is ERC1155, AccessControl {
 
             unchecked {
                 uint256 value = rangeEnd - rangeStart + 1;
-                vars.splitRangesSum[vars.iSplit] -= value;
-                vars.stakeValues[iStake] = value;
+                vars.newRangesSum[vars.iQueue] -= value;
+                vars.splitValues[iSplit] = value;
 
-                if (iStake++ + 1 % stakeRequest.stakeRangeCount[vars.iSplit] == 0) {
-                    vars.iSplit++;
+                if (iSplit++ + 1 % request.splitRangeCount[vars.iQueue] == 0) {
+                    vars.iQueue++;
                 }
             }
         }
 
-        vars.iSplit = 0;
-        while (vars.iSplit < vars.splitRangesSum.length) {
+        vars.iQueue = 0;
+        while (vars.iQueue < vars.newRangesSum.length) {
             unchecked {
-                uint256 totalSplitValue = uint256(-int256(vars.splitRangesSum[vars.iSplit]));
+                uint256 totalSplitValue = uint256(-int256(vars.newRangesSum[vars.iQueue]));
                 require(
-                    vars.splitRangeValues[vars.iSplit] == totalSplitValue,
+                    vars.queueRangeValues[vars.iQueue] == totalSplitValue,
                     InvalidRangeSplits(
-                        stakeRequest.queueSplitRanges[vars.iSplit], vars.splitRangeValues[vars.iSplit], totalSplitValue
+                        request.queueRanges[vars.iQueue], vars.queueRangeValues[vars.iQueue], totalSplitValue
                     )
                 );
-                vars.iSplit++;
+                vars.iQueue++;
             }
         }
 
-        _burnBatch(owner, stakeRequest.queueSplitRanges, vars.splitRangeValues);
-        _mintBatch(owner, stakeRequest.requeueRangesStart, vars.requeueValues, "");
-        stGlyph.mintBatch(owner, stakeRequest.stakeRangesStart, vars.stakeValues, "");
+        return (vars.queueRangeValues, vars.requeueValues, vars.splitValues);
     }
 
     /// @dev Extend existing transfer logic to keep track of account total balances in accordance to `tokenId` -> `value`, where each value in the range represents a single token.
