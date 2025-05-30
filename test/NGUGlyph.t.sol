@@ -20,29 +20,29 @@ contract NGUGlyphTest is Test {
         glyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(this));
     }
 
-    function test_createGlyphs_amount_0_fail() public {
+    function test_mintGlyphs_amount_0_fail() public {
         vm.expectRevert(NGUGlyph.AmountMustBePositive.selector);
-        glyph.createGlyphs(alice.addr, 0, "");
+        glyph.mintGlyphs(alice.addr, 0);
     }
 
-    function test_createGlyphs_autoIncrementID(uint256 aliceAmount, uint256 bobAmount) public {
+    function test_mintGlyphs_autoIncrementID(uint256 aliceAmount, uint256 bobAmount) public {
         vm.assume(aliceAmount > 0 && aliceAmount < 50 ether);
         vm.assume(bobAmount > 0 && bobAmount < 50 ether);
 
         uint256 tokenId;
 
         // first mint
-        tokenId = glyph.createGlyphs(alice.addr, aliceAmount, "");
+        tokenId = glyph.mintGlyphs(alice.addr, aliceAmount);
         assertEq(tokenId, 1, "alice token id should be 1");
 
-        tokenId = glyph.createGlyphs(bob.addr, bobAmount, "");
+        tokenId = glyph.mintGlyphs(bob.addr, bobAmount);
         assertEq(tokenId, aliceAmount + 1, "bob token id should be the next after alice");
     }
 
-    function test_createGlyphs_addToQueueAlternating() public {
-        glyph.createGlyphs(alice.addr, 100, "");
-        glyph.createGlyphs(bob.addr, 20, "");
-        glyph.createGlyphs(alice.addr, 35, "");
+    function test_mintGlyphs_addToQueueAlternating() public {
+        glyph.mintGlyphs(alice.addr, 100);
+        glyph.mintGlyphs(bob.addr, 20);
+        glyph.mintGlyphs(alice.addr, 35);
 
         (uint256[] memory aliceTokenStart, uint256[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
         assertEq(aliceTokenStart.length, 2, "alice queue length should be 2");
@@ -60,9 +60,9 @@ contract NGUGlyphTest is Test {
         assertEq(bobTokenEnd[0], 120, "bobTokenEnd[0] should be 120");
     }
 
-    function test_createGlyphs_mergeSequential() public {
-        glyph.createGlyphs(alice.addr, 100, "");
-        glyph.createGlyphs(alice.addr, 35, "");
+    function test_mintGlyphs_mergeSequential() public {
+        glyph.mintGlyphs(alice.addr, 100);
+        glyph.mintGlyphs(alice.addr, 35);
 
         (uint256[] memory aliceTokenStart, uint256[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
         assertEq(aliceTokenStart.length, 1, "alice queue length should be 1");
@@ -71,12 +71,12 @@ contract NGUGlyphTest is Test {
         assertEq(aliceTokenEnd[0], 135, "aliceTokenEnd[0] should be 135");
     }
 
-    function test_createGlyphs_trackAccountTotalBalance(uint256[5] calldata mintAmounts) public {
+    function test_mintGlyphs_trackAccountTotalBalance(uint256[5] calldata mintAmounts) public {
         uint256 totalBalance;
         for (uint256 i; i < mintAmounts.length; i++) {
             vm.assume(mintAmounts[i] > 0 && mintAmounts[i] < 50 ether);
 
-            glyph.createGlyphs(alice.addr, mintAmounts[i], "");
+            glyph.mintGlyphs(alice.addr, mintAmounts[i]);
             totalBalance += mintAmounts[i];
 
             assertEq(glyph.balanceOf(alice.addr), totalBalance, "alice overall balance not correct");
@@ -84,9 +84,9 @@ contract NGUGlyphTest is Test {
     }
 
     function test_burnGlyphs_success() public {
-        glyph.createGlyphs(alice.addr, 10, ""); // 1 -> 10
-        glyph.createGlyphs(bob.addr, 10, ""); // 11 -> 20
-        glyph.createGlyphs(alice.addr, 20, ""); // 21 -> 40
+        glyph.mintGlyphs(alice.addr, 10); // 1 -> 10
+        glyph.mintGlyphs(bob.addr, 10); // 11 -> 20
+        glyph.mintGlyphs(alice.addr, 20); // 21 -> 40
 
         glyph.burnGlyphs(alice.addr, 15);
 
@@ -95,7 +95,7 @@ contract NGUGlyphTest is Test {
     }
 
     function test_stakeGlyphs_success() public {
-        glyph.createGlyphs(alice.addr, 120, "");
+        glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
 
@@ -158,7 +158,7 @@ contract NGUGlyphTest is Test {
     }
 
     function test_stakeGlyphs_emptyRequest() public {
-        glyph.createGlyphs(alice.addr, 120, "");
+        glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
 
@@ -167,7 +167,7 @@ contract NGUGlyphTest is Test {
     }
 
     function test_stakeGlyphs_emptyRequestRange() public {
-        glyph.createGlyphs(alice.addr, 120, "");
+        glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
 
@@ -182,7 +182,7 @@ contract NGUGlyphTest is Test {
     }
 
     function test_stakeGlyphs_invalidQueueBalance() public {
-        glyph.createGlyphs(alice.addr, 120, "");
+        glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
 
@@ -201,7 +201,7 @@ contract NGUGlyphTest is Test {
     }
 
     function test_stakeGlyphs_invalidRange() public {
-        glyph.createGlyphs(alice.addr, 120, "");
+        glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
 
@@ -246,8 +246,8 @@ contract NGUGlyphTest is Test {
     }
 
     function test_stakeGlyphs_subRangeOutOfBounds() public {
-        glyph.createGlyphs(alice.addr, 10, ""); // 1 -> 10
-        glyph.createGlyphs(bob.addr, 110, ""); // 11 -> 120
+        glyph.mintGlyphs(alice.addr, 10); // 1 -> 10
+        glyph.mintGlyphs(bob.addr, 110); // 11 -> 120
 
         NGUGlyph.SplitRequest memory request;
 
@@ -374,7 +374,7 @@ contract NGUGlyphTest is Test {
     }
 
     function test_stakeGlyphs_rangesNotSequential() public {
-        glyph.createGlyphs(alice.addr, 120, "");
+        glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
 

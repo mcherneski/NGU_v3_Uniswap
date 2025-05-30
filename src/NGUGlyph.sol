@@ -122,13 +122,12 @@ contract NGUGlyph is ERC1155, AccessControl {
         return balance == 0 ? 0 : cursor + balance - 1;
     }
 
-    /// @notice Creates a new glyph with an auto-incrementing ID
+    /// @notice Mints a new glyph with an auto-incrementing ID
     /// @param to The address that will receive the minted tokens
     /// @param amount Amount of tokens to mint
-    /// @param data Additional data with no specified format, sent to the receiver
     /// @return The ID of the newly created glyph
     /// @dev Only callable by addresses with the COMPTROLLER_ROLE
-    function createGlyphs(address to, uint256 amount, bytes calldata data)
+    function mintGlyphs(address to, uint256 amount)
         external
         onlyRole(COMPTROLLER_ROLE)
         returns (uint256)
@@ -146,7 +145,7 @@ contract NGUGlyph is ERC1155, AccessControl {
             _nextTokenId += amount;
         }
 
-        _mint(to, tokenId, amount, data);
+        _mint(to, tokenId, amount, "");
 
         return tokenId;
     }
