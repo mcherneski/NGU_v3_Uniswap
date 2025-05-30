@@ -127,11 +127,7 @@ contract NGUGlyph is ERC1155, AccessControl {
     /// @param amount Amount of tokens to mint
     /// @return The ID of the newly created glyph
     /// @dev Only callable by addresses with the COMPTROLLER_ROLE
-    function mintGlyphs(address to, uint256 amount)
-        external
-        onlyRole(COMPTROLLER_ROLE)
-        returns (uint256)
-    {
+    function mintGlyphs(address to, uint256 amount) external onlyRole(COMPTROLLER_ROLE) returns (uint256) {
         require(amount > 0, AmountMustBePositive());
 
         LinkedListQueue storage queue = _ownerQueue[to];
@@ -387,9 +383,8 @@ contract NGUGlyph is ERC1155, AccessControl {
             }
 
             vars.iQueue = 0;
-            uint256[] memory rangesStartArr = rangeType == RangeType.REQUEUE
-                ? request.requeueRangesStart
-                : request.splitRangesStart;
+            uint256[] memory rangesStartArr =
+                rangeType == RangeType.REQUEUE ? request.requeueRangesStart : request.splitRangesStart;
             for (uint256 rangeIndex; rangeIndex < rangesStartArr.length;) {
                 uint256[] memory rangeCountArr =
                     rangeType == RangeType.REQUEUE ? request.requeueRangeCount : request.splitRangeCount;
@@ -404,9 +399,7 @@ contract NGUGlyph is ERC1155, AccessControl {
                 uint256 rangeStart = rangesStartArr[rangeIndex];
                 uint256[] memory rangesEndArr =
                     rangeType == RangeType.REQUEUE ? request.requeueRangesEnd : request.splitRangesEnd;
-                require(
-                    rangeIndex == 0 || rangeStart > rangesEndArr[rangeIndex - 1], RangesNotSequential(rangeType)
-                );
+                require(rangeIndex == 0 || rangeStart > rangesEndArr[rangeIndex - 1], RangesNotSequential(rangeType));
 
                 uint256 rangeEnd = rangesEndArr[rangeIndex];
                 require(rangeStart <= rangeEnd, InvalidRange(rangeType, rangeStart, rangeEnd));

@@ -78,8 +78,7 @@ contract NGUGlyphTest is Test {
 
         (uint256 mintAmount, uint256 fee) = token.canMintGlyphs(alice.addr);
 
-        vm.prank(alice.addr);
-        token.mintMissingGlyphs();
+        token.mintMissingGlyphs(alice.addr);
 
         assertEq(token.balanceOf(alice.addr), 10 ether - fee, "alice should have paid the mint fee");
         assertEq(glyph.balanceOf(alice.addr), mintAmount, "alice should have been minted the missing glyphs");

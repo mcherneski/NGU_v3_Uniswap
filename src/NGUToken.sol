@@ -47,8 +47,14 @@ contract NGUToken is ERC20, AccessControl {
     /// @param fee The fee for the pool
     /// @param tickSpacing The tick spacing for the pool
     /// @param hooks The hooks for the pool
-    function setPoolKey(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(currency0 < currency1 && (currency0 == address(this) || currency1 == address(this)), InvalidPoolKey(currency0, currency1));
+    function setPoolKey(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        require(
+            currency0 < currency1 && (currency0 == address(this) || currency1 == address(this)),
+            InvalidPoolKey(currency0, currency1)
+        );
         poolKey.currency0 = Currency.wrap(currency0);
         poolKey.currency1 = Currency.wrap(currency1);
         poolKey.fee = fee;
@@ -58,14 +64,15 @@ contract NGUToken is ERC20, AccessControl {
     }
 
     /// @notice Mints missing glyphs for the user
-    function mintMissingGlyphs() public {
-        (uint256 amount, uint256 fee) = canMintGlyphs(_msgSender());
+    /// @param user The address of the user
+    function mintMissingGlyphs(address user) public {
+        (uint256 amount, uint256 fee) = canMintGlyphs(user);
         require(amount > 0, InsufficientBalance());
 
         // TODO: collect fee
-        _burn(_msgSender(), fee);
+        _burn(user, fee);
 
-        glyph.mintGlyphs(_msgSender(), amount);
+        glyph.mintGlyphs(user, amount);
     }
 
     /// @notice Compares the user's token and glyph balances and returns the number of glyphs that can be minted
