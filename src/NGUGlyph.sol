@@ -380,84 +380,63 @@ contract NGUGlyph is ERC1155, AccessControl {
 
         vars.newRangesSum = new uint256[](request.queueRanges.length);
 
-        vars.iQueue = 0;
-        for (uint256 iRequeue; iRequeue < request.requeueRangesStart.length;) {
-            if (request.requeueRangeCount[vars.iQueue] == 0) {
-                unchecked {
-                    vars.iQueue++;
-                }
-                continue;
-            }
-            uint256 requeueCursor = vars.requeueCursors[vars.iQueue];
-
-            uint256 rangeStart = request.requeueRangesStart[iRequeue];
-            require(
-                iRequeue == 0 || rangeStart > request.requeueRangesEnd[iRequeue - 1],
-                RangesNotSequential(RangeType.REQUEUE)
-            );
-
-            uint256 rangeEnd = request.requeueRangesEnd[iRequeue];
-            require(rangeStart <= rangeEnd, InvalidRange(RangeType.REQUEUE, rangeStart, rangeEnd));
-            require(
-                rangeStart >= request.queueRanges[vars.iQueue]
-                    && rangeEnd <= request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
-                RangeOutOfBounds(
-                    RangeType.REQUEUE,
-                    request.queueRanges[vars.iQueue],
-                    request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
-                    rangeStart,
-                    rangeEnd
-                )
-            );
-
-            requeueCursor == 0 ? queue.pushBack(rangeStart) : queue.insertBefore(requeueCursor, rangeStart);
-
+        RangeType[2] memory rangeTypes = [RangeType.REQUEUE, RangeType.SPLIT];
+        for (uint256 iRange; iRange < rangeTypes.length;) {
+            RangeType rangeType = rangeTypes[iRange];
             unchecked {
-                uint256 value = rangeEnd - rangeStart + 1;
-                vars.newRangesSum[vars.iQueue] -= value;
-                vars.requeueValues[iRequeue] = value;
-
-                if (iRequeue++ + 1 % request.requeueRangeCount[vars.iQueue] == 0) {
-                    vars.iQueue++;
-                }
+                iRange++;
             }
-        }
 
-        vars.iQueue = 0;
-        for (uint256 iSplit; iSplit < request.splitRangesStart.length;) {
-            if (request.splitRangeCount[vars.iQueue] == 0) {
+            vars.iQueue = 0;
+            uint256[] memory rangesStartArr = rangeType == RangeType.REQUEUE
+                ? request.requeueRangesStart
+                : request.splitRangesStart;
+            for (uint256 rangeIndex; rangeIndex < rangesStartArr.length;) {
+                uint256[] memory rangeCountArr =
+                    rangeType == RangeType.REQUEUE ? request.requeueRangeCount : request.splitRangeCount;
+
+                if (rangeCountArr[vars.iQueue] == 0) {
+                    unchecked {
+                        vars.iQueue++;
+                    }
+                    continue;
+                }
+
+                uint256 rangeStart = rangesStartArr[rangeIndex];
+                uint256[] memory rangesEndArr =
+                    rangeType == RangeType.REQUEUE ? request.requeueRangesEnd : request.splitRangesEnd;
+                require(
+                    rangeIndex == 0 || rangeStart > rangesEndArr[rangeIndex - 1], RangesNotSequential(rangeType)
+                );
+
+                uint256 rangeEnd = rangesEndArr[rangeIndex];
+                require(rangeStart <= rangeEnd, InvalidRange(rangeType, rangeStart, rangeEnd));
+                require(
+                    rangeStart >= request.queueRanges[vars.iQueue]
+                        && rangeEnd <= request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
+                    RangeOutOfBounds(
+                        rangeType,
+                        request.queueRanges[vars.iQueue],
+                        request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
+                        rangeStart,
+                        rangeEnd
+                    )
+                );
+
+                if (rangeType == RangeType.REQUEUE) {
+                    uint256 requeueCursor = vars.requeueCursors[vars.iQueue];
+                    requeueCursor == 0 ? queue.pushBack(rangeStart) : queue.insertBefore(requeueCursor, rangeStart);
+                }
+
                 unchecked {
-                    vars.iQueue++;
-                }
-                continue;
-            }
+                    uint256 value = rangeEnd - rangeStart + 1;
+                    vars.newRangesSum[vars.iQueue] -= value;
+                    uint256[] memory valuesArr = rangeType == RangeType.REQUEUE ? vars.requeueValues : vars.splitValues;
+                    valuesArr[rangeIndex] = value;
 
-            uint256 rangeStart = request.splitRangesStart[iSplit];
-            require(
-                iSplit == 0 || rangeStart > request.splitRangesEnd[iSplit - 1], RangesNotSequential(RangeType.SPLIT)
-            );
-
-            uint256 rangeEnd = request.splitRangesEnd[iSplit];
-            require(rangeStart <= rangeEnd, InvalidRange(RangeType.SPLIT, rangeStart, rangeEnd));
-            require(
-                rangeStart >= request.queueRanges[vars.iQueue]
-                    && rangeEnd <= request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
-                RangeOutOfBounds(
-                    RangeType.SPLIT,
-                    request.queueRanges[vars.iQueue],
-                    request.queueRanges[vars.iQueue] + vars.queueRangeValues[vars.iQueue] - 1,
-                    rangeStart,
-                    rangeEnd
-                )
-            );
-
-            unchecked {
-                uint256 value = rangeEnd - rangeStart + 1;
-                vars.newRangesSum[vars.iQueue] -= value;
-                vars.splitValues[iSplit] = value;
-
-                if (iSplit++ + 1 % request.splitRangeCount[vars.iQueue] == 0) {
-                    vars.iQueue++;
+                    if (rangeIndex++ + 1 % rangeCountArr[vars.iQueue] == 0) {
+                        vars.iQueue++;
+                    }
                 }
             }
         }
