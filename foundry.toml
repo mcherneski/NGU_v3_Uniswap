@@ -5,7 +5,11 @@ libs = ["lib"]
 build_info = true
 extra_output = ["storageLayout"]
 ffi = true
-fs_permissions = [{ access = "read-write", path = ".forge-snapshots/"}]
+fs_permissions = [
+    { access = "read-write", path = ".forge-snapshots/"},
+    { access = "read", path = "./deployments"},
+    { access = "read", path = "./out"}
+]
 evm_version = "cancun"
 auto_detect_solc = true
 solc_version = "0.8.26"
