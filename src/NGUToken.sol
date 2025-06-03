@@ -4,6 +4,7 @@ pragma solidity ^0.8.10;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {PoolKey, Currency, IHooks} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {NGUGlyph} from "./NGUGlyph.sol";
 
 /// @title NGUToken
@@ -13,7 +14,7 @@ contract NGUToken is ERC20, AccessControl {
     bytes32 public constant COMPTROLLER_ROLE = keccak256("COMPTROLLER_ROLE");
 
     NGUGlyph public immutable glyph;
-
+    IPoolManager public immutable poolManager;
     PoolKey public poolKey;
 
     /// @dev Emitted when the pool key is updated
@@ -26,13 +27,19 @@ contract NGUToken is ERC20, AccessControl {
     error InvalidPoolKey(address currency0, address currency1);
 
     /// @dev Constructor that mints the initial supply to the deployer's address and sets up the default admin role.
-    /// @param initialSupply The initial supply of tokens to mint.
-    constructor(uint256 initialSupply) ERC20("NGU Token", "NGU") {
-        _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
+    /// @param _defaultAdmin The address of the default admin and where the initial supply will be minted.
+    /// @param _initialSupply The initial supply of tokens to mint.
+    /// @param _poolManager The address of the Uniswap V4 pool manager contract.
+    /// @param _glyph The address of the glyph contract.
+    constructor(address _defaultAdmin, uint256 _initialSupply, address _poolManager, address _glyph)
+        ERC20("NGU Token", "NGU")
+    {
+        _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
 
-        _mint(_msgSender(), initialSupply * (10 ** uint256(decimals())));
+        _mint(_defaultAdmin, _initialSupply * (10 ** uint256(decimals())));
 
-        glyph = new NGUGlyph(_msgSender());
+        glyph = NGUGlyph(_glyph);
+        poolManager = IPoolManager(_poolManager);
     }
 
     /// @dev Override decimals to match the standard 18 decimal places used by most ERC20 tokens
@@ -51,10 +58,7 @@ contract NGUToken is ERC20, AccessControl {
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
-        require(
-            currency0 < currency1 && (currency0 == address(this) || currency1 == address(this)),
-            InvalidPoolKey(currency0, currency1)
-        );
+        require(currency0 == address(0) && currency1 == address(this), InvalidPoolKey(currency0, currency1));
         poolKey.currency0 = Currency.wrap(currency0);
         poolKey.currency1 = Currency.wrap(currency1);
         poolKey.fee = fee;

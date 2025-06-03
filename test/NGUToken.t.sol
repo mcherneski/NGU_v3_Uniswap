@@ -1,33 +1,36 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
+import "../script/Deploy.s.sol";
+
+import {GlyphTestHelpers} from "./utils/GlyphTestHelpers.sol";
+import {NGUGlyph} from "../src/NGUGlyph.sol";
 import {Test, Vm, console} from "forge-std/Test.sol";
 
-import {NGUGlyph} from "../src/NGUGlyph.sol";
-import {MockNGUToken} from "./utils/MockNGUToken.sol";
-import {GlyphTestHelpers} from "./utils/GlyphTestHelpers.sol";
-
-contract NGUGlyphTest is Test {
+contract NGUTokenTest is Test {
     using GlyphTestHelpers for NGUGlyph;
 
-    NGUGlyph public glyph;
-    MockNGUToken public token;
+    NGUGlyph internal glyph;
+    NGUToken internal token;
 
-    Vm.Wallet public alice = vm.createWallet("alice");
-    Vm.Wallet public bob = vm.createWallet("bob");
+    Vm.Wallet internal alice = vm.createWallet("alice");
+    Vm.Wallet internal bob = vm.createWallet("bob");
 
     function setUp() public {
-        uint256 initialSupply = 1_000_000_000 ether;
-        token = new MockNGUToken(initialSupply);
+        vm.createSelectFork("base-sepolia");
+
+        Deploy.Contracts memory contracts = new Deploy().deploy();
+
+        token = contracts.nguToken;
         token.grantRole(keccak256("COMPTROLLER_ROLE"), address(this));
 
-        glyph = token.glyph();
+        glyph = contracts.nguGlyph;
         glyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(this));
         glyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(token));
     }
 
     function test__update_burnGlyphsOnTransfer() public {
-        token.mint(alice.addr, 10 ether);
+        deal(address(token), alice.addr, 10 ether);
         glyph.mintGlyphs(alice.addr, 10);
 
         vm.prank(alice.addr);
@@ -40,7 +43,7 @@ contract NGUGlyphTest is Test {
     }
 
     function test__update_maxBurnGlyphsOnTransfer() public {
-        token.mint(alice.addr, 10 ether);
+        deal(address(token), alice.addr, 10 ether);
         glyph.mintGlyphs(alice.addr, 5);
 
         vm.prank(alice.addr);
@@ -53,7 +56,7 @@ contract NGUGlyphTest is Test {
     }
 
     function test_canMintGlyphs_noFee() public {
-        token.mint(alice.addr, 10 ether);
+        deal(address(token), alice.addr, 10 ether);
 
         (uint256 mintAmount, uint256 fee) = token.canMintGlyphs(alice.addr);
 
@@ -64,7 +67,7 @@ contract NGUGlyphTest is Test {
     function test_canMintGlyphs_withFee() public {
         // 1% fee = 10_000
         token.setPoolKey(address(0), address(token), 10_000, 0, address(0));
-        token.mint(alice.addr, 10 ether);
+        deal(address(token), alice.addr, 10 ether);
 
         (uint256 mintAmount, uint256 fee) = token.canMintGlyphs(alice.addr);
 
@@ -74,7 +77,7 @@ contract NGUGlyphTest is Test {
 
     function test_mintMissingGlyphs() public {
         token.setPoolKey(address(0), address(token), 10_000, 0, address(0));
-        token.mint(alice.addr, 10 ether);
+        deal(address(token), alice.addr, 10 ether);
 
         (uint256 mintAmount, uint256 fee) = token.canMintGlyphs(alice.addr);
 
