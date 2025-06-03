@@ -1,97 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import {Test, Vm, console} from "forge-std/Test.sol";
+import {BaseNGUGlyphTest, Vm, console} from "./BaseNGUGlyphTest.sol";
 
-import {NGUGlyph} from "../src/NGUGlyph.sol";
-import {LinkedListQueue, TokenDoesNotExist} from "../src/libraries/LinkedListQueue.sol";
-import {GlyphTestHelpers} from "./utils/GlyphTestHelpers.sol";
+import {NGUGlyph} from "../../src/NGUGlyph.sol";
+import {LinkedListQueue, TokenDoesNotExist} from "../../src/libraries/LinkedListQueue.sol";
+import {GlyphTestHelpers} from "../utils/GlyphTestHelpers.sol";
 
-contract NGUGlyphTest is Test {
+contract NGUGlyphTest_stakeGlyphs is BaseNGUGlyphTest {
     using GlyphTestHelpers for NGUGlyph;
 
-    NGUGlyph public glyph;
-
-    Vm.Wallet public alice = vm.createWallet("alice");
-    Vm.Wallet public bob = vm.createWallet("bob");
-
-    function setUp() public {
-        glyph = new NGUGlyph(address(this));
-        glyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(this));
-    }
-
-    function test_mintGlyphs_amount_0_fail() public {
-        vm.expectRevert(NGUGlyph.AmountMustBePositive.selector);
-        glyph.mintGlyphs(alice.addr, 0);
-    }
-
-    function test_mintGlyphs_autoIncrementID(uint256 aliceAmount, uint256 bobAmount) public {
-        vm.assume(aliceAmount > 0 && aliceAmount < 50 ether);
-        vm.assume(bobAmount > 0 && bobAmount < 50 ether);
-
-        uint256 tokenId;
-
-        // first mint
-        tokenId = glyph.mintGlyphs(alice.addr, aliceAmount);
-        assertEq(tokenId, 1, "alice token id should be 1");
-
-        tokenId = glyph.mintGlyphs(bob.addr, bobAmount);
-        assertEq(tokenId, aliceAmount + 1, "bob token id should be the next after alice");
-    }
-
-    function test_mintGlyphs_addToQueueAlternating() public {
-        glyph.mintGlyphs(alice.addr, 100);
-        glyph.mintGlyphs(bob.addr, 20);
-        glyph.mintGlyphs(alice.addr, 35);
-
-        (uint256[] memory aliceTokenStart, uint256[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
-        assertEq(aliceTokenStart.length, 2, "alice queue length should be 2");
-
-        assertEq(aliceTokenStart[0], 1, "aliceTokenStart[0] should be 1");
-        assertEq(aliceTokenEnd[0], 100, "aliceTokenEnd[0] should be 100");
-
-        assertEq(aliceTokenStart[1], 121, "aliceTokenStart[1] should be 121");
-        assertEq(aliceTokenEnd[1], 155, "aliceTokenEnd[1] should be 155");
-
-        (uint256[] memory bobTokenStart, uint256[] memory bobTokenEnd) = glyph.userTokenQueue(bob.addr);
-        assertEq(bobTokenStart.length, 1, "bob queue length should be 1");
-
-        assertEq(bobTokenStart[0], 101, "bobTokenStart[0] should be 101");
-        assertEq(bobTokenEnd[0], 120, "bobTokenEnd[0] should be 120");
-    }
-
-    function test_mintGlyphs_mergeSequential() public {
-        glyph.mintGlyphs(alice.addr, 100);
-        glyph.mintGlyphs(alice.addr, 35);
-
-        (uint256[] memory aliceTokenStart, uint256[] memory aliceTokenEnd) = glyph.userTokenQueue(alice.addr);
-        assertEq(aliceTokenStart.length, 1, "alice queue length should be 1");
-
-        assertEq(aliceTokenStart[0], 1, "aliceTokenStart[0] should be 1");
-        assertEq(aliceTokenEnd[0], 135, "aliceTokenEnd[0] should be 135");
-    }
-
-    function test_mintGlyphs_trackAccountTotalBalance(uint256[5] calldata mintAmounts) public {
-        uint256 totalBalance;
-        for (uint256 i; i < mintAmounts.length; i++) {
-            vm.assume(mintAmounts[i] > 0 && mintAmounts[i] < 50 ether);
-
-            glyph.mintGlyphs(alice.addr, mintAmounts[i]);
-            totalBalance += mintAmounts[i];
-
-            assertEq(glyph.balanceOf(alice.addr), totalBalance, "alice overall balance not correct");
-        }
-    }
-
-    function test_burnGlyphs_success() public {
-        glyph.mintGlyphs(alice.addr, 10); // 1 -> 10
-        glyph.mintGlyphs(bob.addr, 10); // 11 -> 20
-        glyph.mintGlyphs(alice.addr, 20); // 21 -> 40
-
-        glyph.burnGlyphs(alice.addr, 15);
-
-        assertEq(glyph.balanceOf(alice.addr), 15, "alice overall balance not correct");
-        assertEq(glyph.balanceOf(alice.addr, 26), 15, "alice balance not correct");
+    function setUp() public override {
+        super.setUp();
     }
 
     function test_stakeGlyphs_success() public {
