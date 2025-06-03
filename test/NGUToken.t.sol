@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import "../script/Deploy.s.sol";
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 
+import {Deploy} from "../script/Deploy.s.sol";
 import {GlyphTestHelpers} from "./utils/GlyphTestHelpers.sol";
 import {NGUGlyph} from "../src/NGUGlyph.sol";
+import {NGUToken} from "../src/NGUToken.sol";
 import {Test, Vm, console} from "forge-std/Test.sol";
 
 contract NGUTokenTest is Test {
@@ -19,12 +21,13 @@ contract NGUTokenTest is Test {
     function setUp() public {
         vm.createSelectFork("base-sepolia");
 
-        Deploy.Contracts memory contracts = new Deploy().deploy();
+        Deploy deploy = new Deploy();
+        Deploy.DeployResponse memory response = deploy.deploy(address(this));
 
-        token = contracts.nguToken;
+        token = response.nguToken;
         token.grantRole(keccak256("COMPTROLLER_ROLE"), address(this));
 
-        glyph = contracts.nguGlyph;
+        glyph = response.nguGlyph;
         glyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(this));
         glyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(token));
     }
@@ -56,6 +59,9 @@ contract NGUTokenTest is Test {
     }
 
     function test_canMintGlyphs_noFee() public {
+        PoolKey memory poolKey = token.getPoolKey();
+        token.setPoolParams(0, poolKey.tickSpacing, poolKey.hooks);
+
         deal(address(token), alice.addr, 10 ether);
 
         (uint256 mintAmount, uint256 fee) = token.canMintGlyphs(alice.addr);
@@ -65,8 +71,6 @@ contract NGUTokenTest is Test {
     }
 
     function test_canMintGlyphs_withFee() public {
-        // 1% fee = 10_000
-        token.setPoolKey(address(0), address(token), 10_000, 0, address(0));
         deal(address(token), alice.addr, 10 ether);
 
         (uint256 mintAmount, uint256 fee) = token.canMintGlyphs(alice.addr);
@@ -76,7 +80,6 @@ contract NGUTokenTest is Test {
     }
 
     function test_mintMissingGlyphs() public {
-        token.setPoolKey(address(0), address(token), 10_000, 0, address(0));
         deal(address(token), alice.addr, 10 ether);
 
         (uint256 mintAmount, uint256 fee) = token.canMintGlyphs(alice.addr);

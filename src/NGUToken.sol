@@ -3,28 +3,26 @@ pragma solidity ^0.8.10;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {PoolKey, Currency, IHooks} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {IPoolManager, PoolKey, Currency, IHooks} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {SafeCallback} from "@uniswap/v4-periphery/src/base/SafeCallback.sol";
 import {NGUGlyph} from "./NGUGlyph.sol";
 
 /// @title NGUToken
 /// @dev Implementation of the ERC20 token for the NGU project with role-based access control.
 ///  This contract extends OpenZeppelin's ERC20 and AccessControl implementations.
-contract NGUToken is ERC20, AccessControl {
+contract NGUToken is ERC20, SafeCallback, AccessControl {
     bytes32 public constant COMPTROLLER_ROLE = keccak256("COMPTROLLER_ROLE");
 
     NGUGlyph public immutable glyph;
-    IPoolManager public immutable poolManager;
-    PoolKey public poolKey;
+
+    PoolKey private poolKey;
 
     /// @dev Emitted when the pool key is updated
-    event PoolKeyUpdated(PoolKey key);
+    event PoolKeyUpdated(uint24 _fee, int24 _tickSpacing, IHooks _hooks);
 
     /// @dev Thrown when the caller does not have enough tokens to mint glyphs.
     error InsufficientBalance();
-
-    /// @dev Thrown when the pool key is invalid
-    error InvalidPoolKey(address currency0, address currency1);
 
     /// @dev Constructor that mints the initial supply to the deployer's address and sets up the default admin role.
     /// @param _defaultAdmin The address of the default admin and where the initial supply will be minted.
@@ -33,13 +31,13 @@ contract NGUToken is ERC20, AccessControl {
     /// @param _glyph The address of the glyph contract.
     constructor(address _defaultAdmin, uint256 _initialSupply, address _poolManager, address _glyph)
         ERC20("NGU Token", "NGU")
+        SafeCallback(IPoolManager(_poolManager))
     {
         _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
 
         _mint(_defaultAdmin, _initialSupply * (10 ** uint256(decimals())));
 
         glyph = NGUGlyph(_glyph);
-        poolManager = IPoolManager(_poolManager);
     }
 
     /// @dev Override decimals to match the standard 18 decimal places used by most ERC20 tokens
@@ -48,23 +46,21 @@ contract NGUToken is ERC20, AccessControl {
         return 18;
     }
 
+    /// @notice Returns the pool key
+    function getPoolKey() public view returns (PoolKey memory) {
+        return poolKey;
+    }
+
     /// @notice Sets the pool key for Uniswap V4
-    /// @param currency0 The address of the first currency in the pool
-    /// @param currency1 The address of the second currency in the pool
-    /// @param fee The fee for the pool
-    /// @param tickSpacing The tick spacing for the pool
-    /// @param hooks The hooks for the pool
-    function setPoolKey(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
-        require(currency0 == address(0) && currency1 == address(this), InvalidPoolKey(currency0, currency1));
-        poolKey.currency0 = Currency.wrap(currency0);
-        poolKey.currency1 = Currency.wrap(currency1);
-        poolKey.fee = fee;
-        poolKey.tickSpacing = tickSpacing;
-        poolKey.hooks = IHooks(hooks);
-        emit PoolKeyUpdated(poolKey);
+    /// @param _fee The fee for the pool
+    /// @param _tickSpacing The tick spacing for the pool
+    /// @param _hooks The hooks contract for the pool
+    function setPoolParams(uint24 _fee, int24 _tickSpacing, IHooks _hooks) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        poolKey.currency1 = Currency.wrap(address(this));
+        poolKey.fee = _fee;
+        poolKey.tickSpacing = _tickSpacing;
+        poolKey.hooks = _hooks;
+        emit PoolKeyUpdated(_fee, _tickSpacing, _hooks);
     }
 
     /// @notice Mints missing glyphs for the user
@@ -73,8 +69,14 @@ contract NGUToken is ERC20, AccessControl {
         (uint256 amount, uint256 fee) = canMintGlyphs(user);
         require(amount > 0, InsufficientBalance());
 
-        // TODO: collect fee
-        _burn(user, fee);
+        poolManager.unlock(
+            abi.encode(
+                CallbackData({
+                    action: CallbackAction.DONATE,
+                    data: abi.encode(CallbackDonateData({from: user, amount: fee}))
+                })
+            )
+        );
 
         glyph.mintGlyphs(user, amount);
     }
@@ -128,5 +130,41 @@ contract NGUToken is ERC20, AccessControl {
                 glyph.burnGlyphs(from, uint256(-balanceDiff));
             }
         }
+    }
+
+    enum CallbackAction {
+        DONATE
+    }
+
+    struct CallbackData {
+        CallbackAction action;
+        bytes data;
+    }
+
+    struct CallbackDonateData {
+        address from;
+        uint256 amount;
+    }
+
+    error InvalidCallbackAction(uint256 action);
+    error InvalidBalanceDelta(BalanceDelta delta);
+
+    function _unlockCallback(bytes calldata data) internal override returns (bytes memory) {
+        CallbackData memory callbackData = abi.decode(data, (CallbackData));
+
+        if (callbackData.action == CallbackAction.DONATE) {
+            CallbackDonateData memory donateData = abi.decode(callbackData.data, (CallbackDonateData));
+            BalanceDelta delta = poolManager.donate(poolKey, 0, donateData.amount, "");
+
+            require(delta.amount0() == 0 && delta.amount1() < 0, InvalidBalanceDelta(delta));
+
+            poolManager.sync(poolKey.currency1);
+            _update(donateData.from, address(poolManager), uint256(int256(-delta.amount1())));
+            poolManager.settle();
+
+            return abi.encode(delta);
+        }
+
+        revert InvalidCallbackAction(uint256(callbackData.action));
     }
 }
