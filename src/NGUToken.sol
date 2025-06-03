@@ -16,7 +16,7 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
 
     NGUGlyph public immutable glyph;
 
-    PoolKey private poolKey;
+    PoolKey internal _poolKey;
 
     /// @dev Emitted when the pool key is updated
     event PoolKeyUpdated(uint24 _fee, int24 _tickSpacing, IHooks _hooks);
@@ -48,7 +48,7 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
 
     /// @notice Returns the pool key
     function getPoolKey() public view returns (PoolKey memory) {
-        return poolKey;
+        return _poolKey;
     }
 
     /// @notice Sets the pool key for Uniswap V4
@@ -56,10 +56,10 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
     /// @param _tickSpacing The tick spacing for the pool
     /// @param _hooks The hooks contract for the pool
     function setPoolParams(uint24 _fee, int24 _tickSpacing, IHooks _hooks) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        poolKey.currency1 = Currency.wrap(address(this));
-        poolKey.fee = _fee;
-        poolKey.tickSpacing = _tickSpacing;
-        poolKey.hooks = _hooks;
+        _poolKey.currency1 = Currency.wrap(address(this));
+        _poolKey.fee = _fee;
+        _poolKey.tickSpacing = _tickSpacing;
+        _poolKey.hooks = _hooks;
         emit PoolKeyUpdated(_fee, _tickSpacing, _hooks);
     }
 
@@ -85,7 +85,7 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
     /// @param user The address of the user
     /// @return amount The number of glyphs that can be minted
     /// @return fee The fee for minting the glyphs
-    function canMintGlyphs(address user) public view returns (uint256 amount, uint256 fee) {
+    function canMintGlyphs(address user) public view virtual returns (uint256 amount, uint256 fee) {
         int256 balanceDiff = _glyphBalanceDiff(user);
         if (balanceDiff > 0) {
             amount = uint256(balanceDiff);
@@ -105,22 +105,22 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
     /// @dev Calculates the fee for minting glyphs
     /// @param amount The amount of glyphs to mint
     /// @return fee The fee for minting the glyphs
-    function _calculateGlyphMintFee(uint256 amount) internal view returns (uint256 fee) {
-        fee = amount * (10 ** uint256(decimals())) * poolKey.fee / 100_000;
+    function _calculateGlyphMintFee(uint256 amount) internal view virtual returns (uint256 fee) {
+        fee = amount * (10 ** uint256(decimals())) * _poolKey.fee / 1_000_000;
     }
 
     /// @dev Compares the user's token and glyph balances and returns the difference
     /// @dev Positive values mean the user has more tokens than glyphs
     /// @param user The address of the user
     /// @return The difference between the user's token and glyph balances
-    function _glyphBalanceDiff(address user) public view returns (int256) {
+    function _glyphBalanceDiff(address user) internal view virtual returns (int256) {
         uint256 expectedBalance = balanceOf(user) / (10 ** uint256(decimals()));
         uint256 glyphBalance = glyph.balanceOf(user);
         return int256(expectedBalance) - int256(glyphBalance);
     }
 
     /// @dev Override _update to burn glyphs when tokens are transferred.
-    function _update(address from, address to, uint256 value) internal override {
+    function _update(address from, address to, uint256 value) internal virtual override {
         super._update(from, to, value);
 
         // When a user transfers out their tokens, we burn their glyphs
@@ -147,18 +147,18 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
     }
 
     error InvalidCallbackAction(uint256 action);
-    error InvalidBalanceDelta(BalanceDelta delta);
+    error InvalidBalanceDelta(int128 amount0, int128 amount1);
 
     function _unlockCallback(bytes calldata data) internal override returns (bytes memory) {
         CallbackData memory callbackData = abi.decode(data, (CallbackData));
 
         if (callbackData.action == CallbackAction.DONATE) {
             CallbackDonateData memory donateData = abi.decode(callbackData.data, (CallbackDonateData));
-            BalanceDelta delta = poolManager.donate(poolKey, 0, donateData.amount, "");
+            BalanceDelta delta = poolManager.donate(_poolKey, 0, donateData.amount, "");
 
-            require(delta.amount0() == 0 && delta.amount1() < 0, InvalidBalanceDelta(delta));
+            require(delta.amount0() == 0 && delta.amount1() < 0, InvalidBalanceDelta(delta.amount0(), delta.amount1()));
 
-            poolManager.sync(poolKey.currency1);
+            poolManager.sync(_poolKey.currency1);
             _update(donateData.from, address(poolManager), uint256(int256(-delta.amount1())));
             poolManager.settle();
 

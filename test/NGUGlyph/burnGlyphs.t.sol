@@ -14,7 +14,7 @@ contract NGUGlyphTest_burnGlyphs is BaseNGUGlyphTest {
         super.setUp();
     }
 
-    function test_burnGlyphs_success() public {
+    function test_success() public {
         glyph.mintGlyphs(alice.addr, 10); // 1 -> 10
         glyph.mintGlyphs(bob.addr, 10); // 11 -> 20
         glyph.mintGlyphs(alice.addr, 20); // 21 -> 40

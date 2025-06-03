@@ -45,3 +45,5 @@ tasks/
 /generated
 /deployments/localhost
 /deployments/31337
+
+!*.t.sol

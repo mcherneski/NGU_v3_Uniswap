@@ -14,7 +14,7 @@ contract NGUGlyphTest_stakeGlyphs is BaseNGUGlyphTest {
         super.setUp();
     }
 
-    function test_stakeGlyphs_success() public {
+    function test_success() public {
         glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
@@ -77,7 +77,7 @@ contract NGUGlyphTest_stakeGlyphs is BaseNGUGlyphTest {
         assertEq(thisBalances[2], 11, "staked balance of ID 101 should be 11");
     }
 
-    function test_stakeGlyphs_emptyRequest() public {
+    function test_emptyRequest() public {
         glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
@@ -86,7 +86,7 @@ contract NGUGlyphTest_stakeGlyphs is BaseNGUGlyphTest {
         glyph.stakeGlyphs(request);
     }
 
-    function test_stakeGlyphs_emptyRequestRange() public {
+    function test_emptyRequestRange() public {
         glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
@@ -101,7 +101,7 @@ contract NGUGlyphTest_stakeGlyphs is BaseNGUGlyphTest {
         glyph.stakeGlyphs(request);
     }
 
-    function test_stakeGlyphs_invalidQueueBalance() public {
+    function test_invalidQueueBalance() public {
         glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
@@ -120,7 +120,7 @@ contract NGUGlyphTest_stakeGlyphs is BaseNGUGlyphTest {
         glyph.stakeGlyphs(request);
     }
 
-    function test_stakeGlyphs_invalidRange() public {
+    function test_invalidRange() public {
         glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;
@@ -165,7 +165,7 @@ contract NGUGlyphTest_stakeGlyphs is BaseNGUGlyphTest {
         glyph.stakeGlyphs(request);
     }
 
-    function test_stakeGlyphs_subRangeOutOfBounds() public {
+    function test_subRangeOutOfBounds() public {
         glyph.mintGlyphs(alice.addr, 10); // 1 -> 10
         glyph.mintGlyphs(bob.addr, 110); // 11 -> 120
 
@@ -293,7 +293,7 @@ contract NGUGlyphTest_stakeGlyphs is BaseNGUGlyphTest {
         glyph.stakeGlyphs(request);
     }
 
-    function test_stakeGlyphs_rangesNotSequential() public {
+    function test_rangesNotSequential() public {
         glyph.mintGlyphs(alice.addr, 120);
 
         NGUGlyph.SplitRequest memory request;

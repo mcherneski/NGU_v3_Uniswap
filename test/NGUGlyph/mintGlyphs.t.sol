@@ -14,12 +14,12 @@ contract NGUGlyphTest_mintGlyphs is BaseNGUGlyphTest {
         super.setUp();
     }
 
-    function test_mintGlyphs_amount_0_fail() public {
+    function test_amount_0_fail() public {
         vm.expectRevert(NGUGlyph.AmountMustBePositive.selector);
         glyph.mintGlyphs(alice.addr, 0);
     }
 
-    function test_mintGlyphs_autoIncrementID(uint256 aliceAmount, uint256 bobAmount) public {
+    function test_autoIncrementID(uint256 aliceAmount, uint256 bobAmount) public {
         vm.assume(aliceAmount > 0 && aliceAmount < 50 ether);
         vm.assume(bobAmount > 0 && bobAmount < 50 ether);
 
@@ -33,7 +33,7 @@ contract NGUGlyphTest_mintGlyphs is BaseNGUGlyphTest {
         assertEq(tokenId, aliceAmount + 1, "bob token id should be the next after alice");
     }
 
-    function test_mintGlyphs_addToQueueAlternating() public {
+    function test_addToQueueAlternating() public {
         glyph.mintGlyphs(alice.addr, 100);
         glyph.mintGlyphs(bob.addr, 20);
         glyph.mintGlyphs(alice.addr, 35);
@@ -54,7 +54,7 @@ contract NGUGlyphTest_mintGlyphs is BaseNGUGlyphTest {
         assertEq(bobTokenEnd[0], 120, "bobTokenEnd[0] should be 120");
     }
 
-    function test_mintGlyphs_mergeSequential() public {
+    function test_mergeSequential() public {
         glyph.mintGlyphs(alice.addr, 100);
         glyph.mintGlyphs(alice.addr, 35);
 
@@ -65,7 +65,7 @@ contract NGUGlyphTest_mintGlyphs is BaseNGUGlyphTest {
         assertEq(aliceTokenEnd[0], 135, "aliceTokenEnd[0] should be 135");
     }
 
-    function test_mintGlyphs_trackAccountTotalBalance(uint256[5] calldata mintAmounts) public {
+    function test_trackAccountTotalBalance(uint256[5] calldata mintAmounts) public {
         uint256 totalBalance;
         for (uint256 i; i < mintAmounts.length; i++) {
             vm.assume(mintAmounts[i] > 0 && mintAmounts[i] < 50 ether);
