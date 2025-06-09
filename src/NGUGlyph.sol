@@ -2,9 +2,9 @@
 pragma solidity ^0.8.10;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {Arrays} from "@openzeppelin/contracts/utils/Arrays.sol";
+import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 
-import {ERC1155NonTransferable, ERC1155} from "./utils/ERC1155NonTransferable.sol";
+import {ERC1155Modified} from "./utils/ERC1155Modified.sol";
 import {LinkedListQueue} from "./libraries/LinkedListQueue.sol";
 import {NGUStakedGlyph} from "./NGUStakedGlyph.sol";
 
@@ -21,9 +21,7 @@ import {NGUStakedGlyph} from "./NGUStakedGlyph.sol";
 ///
 ///  If you want to stake a single token, or sub-range of tokens, that are part of an existing range, you must split the
 ///  range into multiple smaller ranges of sequential token IDs. See {stakeGlyphs}
-contract NGUGlyph is ERC1155NonTransferable, AccessControl {
-    using Arrays for uint256[];
-
+contract NGUGlyph is ERC1155Modified, AccessControl {
     bytes32 public constant COMPTROLLER_ROLE = keccak256("COMPTROLLER_ROLE");
 
     NGUStakedGlyph public stGlyph;
@@ -32,7 +30,6 @@ contract NGUGlyph is ERC1155NonTransferable, AccessControl {
     uint256 private _nextTokenId = 1;
 
     mapping(address => LinkedListQueue) private _ownerQueue;
-    mapping(address account => uint256) private _balances;
 
     enum RangeType {
         EXISTING,
@@ -83,14 +80,10 @@ contract NGUGlyph is ERC1155NonTransferable, AccessControl {
 
     /// @notice Constructor that sets up the default admin role and deploys the staked glyph contract
     /// @param _defaultAdmin The address of the default admin.
-    constructor(address _defaultAdmin) ERC1155NonTransferable("") {
+    constructor(address _defaultAdmin) ERC1155("") {
         _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
 
         stGlyph = new NGUStakedGlyph("");
-    }
-
-    function balanceOf(address account) public view returns (uint256) {
-        return _balances[account];
     }
 
     /// @notice Get the token ranges in a user's queue
@@ -449,37 +442,6 @@ contract NGUGlyph is ERC1155NonTransferable, AccessControl {
         }
 
         return (vars.queueRangeValues, vars.requeueValues, vars.splitValues);
-    }
-
-    /// @dev Extend existing transfer logic to keep track of account total balances in accordance to `tokenId` -> `value`, where each value in the range represents a single token.
-    function _update(address from, address to, uint256[] memory ids, uint256[] memory values)
-        internal
-        virtual
-        override
-    {
-        super._update(from, to, ids, values);
-
-        if (from == address(0)) {
-            unchecked {
-                uint256 totalMintValue;
-                for (uint256 i; i < ids.length; ++i) {
-                    uint256 value = values.unsafeMemoryAccess(i);
-                    totalMintValue += value;
-                }
-                _balances[to] += totalMintValue;
-            }
-        }
-
-        if (to == address(0)) {
-            unchecked {
-                uint256 totalBurnValue;
-                for (uint256 i; i < ids.length; ++i) {
-                    uint256 value = values.unsafeMemoryAccess(i);
-                    totalBurnValue += value;
-                }
-                _balances[from] -= totalBurnValue;
-            }
-        }
     }
 
     /// @dev See {IERC165-supportsInterface}.
