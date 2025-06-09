@@ -39,7 +39,7 @@ contract UniswapHook is BaseHook {
     ///  Calculates the NGU token delta for the swap initiator ('sender')
     ///  and calls the NGU token contract to adjust glyph balance.
     function _afterSwap(
-        address caller,
+        address, // caller,
         PoolKey calldata key,
         IPoolManager.SwapParams calldata swapParams,
         BalanceDelta delta,

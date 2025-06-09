@@ -2,14 +2,14 @@
 pragma solidity ^0.8.10;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import {Arrays} from "@openzeppelin/contracts/utils/Arrays.sol";
 
+import {ERC1155NonTransferable, ERC1155} from "./utils/ERC1155NonTransferable.sol";
 import {LinkedListQueue} from "./libraries/LinkedListQueue.sol";
 import {NGUStakedGlyph} from "./NGUStakedGlyph.sol";
 
 /// @title NGUGlyph
-/// @notice Implementation of the ERC1155 token standard with a twist.
+/// @notice Non-Transferable ERC1155
 /// @dev The underlying balance mapping (`tokenId` -> `value`) represents a range, where each value within that range
 ///  represents a single token.
 ///
@@ -21,10 +21,10 @@ import {NGUStakedGlyph} from "./NGUStakedGlyph.sol";
 ///
 ///  If you want to stake a single token, or sub-range of tokens, that are part of an existing range, you must split the
 ///  range into multiple smaller ranges of sequential token IDs. See {stakeGlyphs}
-contract NGUGlyph is ERC1155, AccessControl {
+contract NGUGlyph is ERC1155NonTransferable, AccessControl {
     using Arrays for uint256[];
 
-    bytes32 public immutable COMPTROLLER_ROLE = keccak256("COMPTROLLER_ROLE");
+    bytes32 public constant COMPTROLLER_ROLE = keccak256("COMPTROLLER_ROLE");
 
     NGUStakedGlyph public stGlyph;
 
@@ -83,7 +83,7 @@ contract NGUGlyph is ERC1155, AccessControl {
 
     /// @notice Constructor that sets up the default admin role and deploys the staked glyph contract
     /// @param _defaultAdmin The address of the default admin.
-    constructor(address _defaultAdmin) ERC1155("") {
+    constructor(address _defaultAdmin) ERC1155NonTransferable("") {
         _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
 
         stGlyph = new NGUStakedGlyph("");

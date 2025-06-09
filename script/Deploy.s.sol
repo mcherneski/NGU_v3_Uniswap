@@ -68,7 +68,7 @@ contract Deploy is DeployScript, AddressRegistry, CreatePoolAndAddLiquidityScrip
         _createPoolAndAddLiquidity(admin, args);
     }
 
-    function _mineHookAddressSalt(address poolManager, address nguToken) internal returns (bytes32 salt) {
+    function _mineHookAddressSalt(address poolManager, address nguToken) internal view returns (bytes32 salt) {
         // hook contracts must have specific flags encoded in the address
         uint160 flags = uint160(Hooks.AFTER_SWAP_FLAG);
 
