@@ -2,35 +2,27 @@
 pragma solidity ^0.8.13;
 
 import "forge-deploy/DeployScript.sol";
-
+import {console} from "forge-std/console.sol";
 import "generated/deployer/DeployerFunctions.g.sol";
-import "./CreatePoolAndAddLiquidity.s.sol";
+
 import {Actions as UniswapActions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {IPoolInitializer_v4} from "@uniswap/v4-periphery/src/interfaces/IPoolInitializer_v4.sol";
 import {IPoolManager, PoolKey, Currency, IHooks} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
-import {console} from "forge-std/console.sol";
+import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 
-contract Deploy is DeployScript, CreatePoolAndAddLiquidityScript {
+import {CreatePoolAndAddLiquidityScript} from "../utils/CreatePoolAndAddLiquidity.s.sol";
+import {AddressRegistry} from "../utils/AddressRegistry.sol";
+
+contract Deploy is DeployScript, AddressRegistry, CreatePoolAndAddLiquidityScript {
     using DeployerFunctions for Deployer;
-
-    mapping(string => mapping(string => address)) public addresses;
-
-    constructor() {
-        addresses["base"]["PositionManager"] = 0x7C5f5A4bBd8fD63184577525326123B519429bDc;
-        addresses["base"]["PoolManager"] = 0x498581fF718922c3f8e6A244956aF099B2652b2b;
-        addresses["base"]["Permit2"] = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-
-        addresses["base-sepolia"]["PositionManager"] = 0x4B2C77d209D3405F41a037Ec6c77F7F5b8e2ca80;
-        addresses["base-sepolia"]["PoolManager"] = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
-        addresses["base-sepolia"]["Permit2"] = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-    }
 
     struct DeployResponse {
         NGUToken nguToken;
         NGUGlyph nguGlyph;
-        PoolKey poolKey;
+        IHooks hooks;
     }
 
     function deploy() public returns (DeployResponse memory res) {
@@ -46,16 +38,24 @@ contract Deploy is DeployScript, CreatePoolAndAddLiquidityScript {
         res.nguGlyph = deployer.deploy_NGUGlyph("NGUGlyph", admin);
         res.nguToken = deployer.deploy_NGUToken("NGUToken", admin, 1_000 ether, poolManager, address(res.nguGlyph));
 
+        bytes32 hookSalt = _mineHookAddressSalt(poolManager, address(res.nguToken));
+        res.hooks = deployer.deploy_UniswapHook(
+            "UniswapHook", IPoolManager(poolManager), res.nguToken, DeployOptions({salt: uint256(hookSalt)})
+        );
+
         PoolKey memory poolKey = PoolKey({
             currency0: Currency.wrap(address(0)),
             currency1: Currency.wrap(address(res.nguToken)),
             fee: 10_000, // 1%
             tickSpacing: 60,
-            hooks: IHooks(address(0))
+            hooks: res.hooks
         });
 
-        vm.broadcast(admin);
+        vm.startBroadcast(admin);
+        res.nguGlyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(res.nguToken));
+        res.nguToken.grantRole(keccak256("COMPTROLLER_ROLE"), address(res.hooks));
         res.nguToken.setPoolParams(poolKey.fee, poolKey.tickSpacing, poolKey.hooks);
+        vm.stopBroadcast();
 
         CreatePoolAndAddLiquidityScript.Args memory args;
         args.permit2 = IAllowanceTransfer(permit2);
@@ -68,9 +68,15 @@ contract Deploy is DeployScript, CreatePoolAndAddLiquidityScript {
         _createPoolAndAddLiquidity(admin, args);
     }
 
-    function getAddress(string memory name) public view returns (address) {
-        VmSafe.Chain memory chain = vmSafe.getChain(block.chainid);
-        return addresses[chain.name][name];
+    function _mineHookAddressSalt(address poolManager, address nguToken) internal returns (bytes32 salt) {
+        // hook contracts must have specific flags encoded in the address
+        uint160 flags = uint160(Hooks.AFTER_SWAP_FLAG);
+
+        // Mine a salt that will produce a hook address with the correct flags
+        bytes memory constructorArgs = abi.encode(poolManager, nguToken);
+        address CREATE2_DEPLOYER = address(0x4e59b44847b379578588920cA78FbF26c0B4956C);
+        ( /* address hookAddress */ , salt) =
+            HookMiner.find(CREATE2_DEPLOYER, flags, type(UniswapHook).creationCode, constructorArgs);
     }
 
     modifier sync() {

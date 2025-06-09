@@ -15,11 +15,7 @@ contract NGUTokenTest__update is BaseNGUTokenTest {
     function setUp() public override {
         super.setUp();
 
-        vm.mockCall(
-            address(glyph),
-            abi.encodeWithSelector(glyph.burnGlyphs.selector),
-            ""
-        );
+        vm.mockCall(address(glyph), abi.encodeWithSelector(glyph.burnGlyphs.selector), "");
     }
 
     function test_burnGlyphsOnTransfer_balanceMatch() public {

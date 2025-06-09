@@ -13,8 +13,8 @@ import {GlyphTestHelpers} from "../utils/GlyphTestHelpers.sol";
 contract BaseNGUTokenTest is BaseTest {
     using GlyphTestHelpers for NGUGlyph;
 
-    NGUGlyph internal glyph;
     MockNGUToken internal token;
+    NGUGlyph internal glyph;
 
     function setUp() public virtual override {
         super.setUp();

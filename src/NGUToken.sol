@@ -65,7 +65,7 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
 
     /// @notice Mints missing glyphs for the user
     /// @param user The address of the user
-    function mintMissingGlyphs(address user) public {
+    function mintMissingGlyphs(address user) external {
         (uint256 amount, uint256 fee) = canMintGlyphs(user);
         require(amount > 0, InsufficientBalance());
 
@@ -81,23 +81,58 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
         glyph.mintGlyphs(user, amount);
     }
 
+    /// @notice Mints missing glyphs for the user
+    /// @notice Only callable by the Uniswap V4 hooks contract
+    /// @param user The address of the user
+    /// @param swapAmount The amount of tokens swapped
+    function mintMissingGlyphsAfterSwap(address user, uint256 swapAmount) external {
+        require(_msgSender() == address(_poolKey.hooks), "only hooks");
+
+        (uint256 amount,) = _canMintGlyphs(user, swapAmount, false);
+        if (amount > 0) glyph.mintGlyphs(user, amount);
+    }
+
+    /// @dev Mints missing glyphs for the user
+    /// @param user The address of the user
+    function _mintMissingGlyphs(address user) internal returns (uint256 amount, uint256 fee) {
+        (amount, fee) = canMintGlyphs(user);
+        if (amount > 0) glyph.mintGlyphs(user, amount);
+    }
+
     /// @notice Compares the user's token and glyph balances and returns the number of glyphs that can be minted
     /// @param user The address of the user
     /// @return amount The number of glyphs that can be minted
     /// @return fee The fee for minting the glyphs
     function canMintGlyphs(address user) public view virtual returns (uint256 amount, uint256 fee) {
-        int256 balanceDiff = _glyphBalanceDiff(user);
+        return _canMintGlyphs(user, 0, true);
+    }
+
+    /// @dev Compares the user's token and glyph balances and returns the number of glyphs that can be minted
+    /// @param user The address of the user
+    /// @param additionalBalance The additional balance to check
+    /// @param chargeFee Whether to charge a fee
+    /// @return amount The number of glyphs that can be minted
+    /// @return fee The fee for minting the glyphs
+    function _canMintGlyphs(address user, uint256 additionalBalance, bool chargeFee)
+        internal
+        view
+        returns (uint256 amount, uint256 fee)
+    {
+        int256 balanceDiff = _glyphBalanceDiff(user, additionalBalance);
         if (balanceDiff > 0) {
             amount = uint256(balanceDiff);
-            fee = _calculateGlyphMintFee(amount);
 
-            // Reduce the amount to mint if they cannot afford the fee
-            uint256 mintableAmount = (balanceOf(user) - fee) / (10 ** uint256(decimals()));
-            if (mintableAmount == 0) {
-                return (0, 0);
-            } else if (mintableAmount < amount) {
-                amount = mintableAmount;
-                fee = _calculateGlyphMintFee(mintableAmount);
+            if (chargeFee) {
+                fee = _calculateGlyphMintFee(amount);
+
+                // Reduce the amount to mint if they cannot afford the fee
+                uint256 mintableAmount = (balanceOf(user) - fee) / (10 ** uint256(decimals()));
+                if (mintableAmount == 0) {
+                    return (0, 0);
+                } else if (mintableAmount < amount) {
+                    amount = mintableAmount;
+                    fee = _calculateGlyphMintFee(mintableAmount);
+                }
             }
         }
     }
@@ -112,9 +147,10 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
     /// @dev Compares the user's token and glyph balances and returns the difference
     /// @dev Positive values mean the user has more tokens than glyphs
     /// @param user The address of the user
+    /// @param additionalBalance The amount of tokens to add to the user's balance
     /// @return The difference between the user's token and glyph balances
-    function _glyphBalanceDiff(address user) internal view virtual returns (int256) {
-        uint256 expectedBalance = balanceOf(user) / (10 ** uint256(decimals()));
+    function _glyphBalanceDiff(address user, uint256 additionalBalance) internal view virtual returns (int256) {
+        uint256 expectedBalance = (balanceOf(user) + additionalBalance) / (10 ** uint256(decimals()));
         uint256 glyphBalance = glyph.balanceOf(user);
         return int256(expectedBalance) - int256(glyphBalance);
     }
@@ -125,7 +161,7 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
 
         // When a user transfers out their tokens, we burn their glyphs
         if (from != address(0)) {
-            int256 balanceDiff = _glyphBalanceDiff(from);
+            int256 balanceDiff = _glyphBalanceDiff(from, 0);
             if (balanceDiff < 0) {
                 glyph.burnGlyphs(from, uint256(-balanceDiff));
             }

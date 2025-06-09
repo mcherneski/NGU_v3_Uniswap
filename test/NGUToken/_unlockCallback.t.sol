@@ -18,16 +18,8 @@ contract NGUTokenTest__unlockCallback is BaseNGUTokenTest {
     function setUp() public override {
         super.setUp();
 
-        vm.mockCall(
-            address(token.poolManager()),
-            abi.encodeWithSelector(IPoolManager.sync.selector),
-            ""
-        );
-        vm.mockCall(
-            address(token.poolManager()),
-            abi.encodeWithSelector(IPoolManager.settle.selector),
-            abi.encode(0)
-        );
+        vm.mockCall(address(token.poolManager()), abi.encodeWithSelector(IPoolManager.sync.selector), "");
+        vm.mockCall(address(token.poolManager()), abi.encodeWithSelector(IPoolManager.settle.selector), abi.encode(0));
     }
 
     function test_donate_transfersBalanceToPoolManager() public {
