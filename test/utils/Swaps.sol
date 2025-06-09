@@ -21,6 +21,12 @@ abstract contract Swaps is CommonBase, AddressRegistry {
         router = UniversalRouter(payable(getAddress("UniversalRouter")));
     }
 
+    function _swapTokens(PoolKey memory key, address user, int128 amount) internal {
+        _swapTokens(key, user, amount, _blank);
+    }
+
+    function _blank() private {}
+
     function _swapTokens(PoolKey memory key, address user, int128 amount, function() internal beforeExecute) internal {
         // Encode the Universal Router command
         bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP), uint8(Commands.SWEEP));

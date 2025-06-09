@@ -31,6 +31,10 @@ contract NGUTokenTest__update is BaseNGUTokenTest {
         deal(address(token), alice.addr, 10 ether);
         glyph.mintGlyphs(alice.addr, 5);
 
+//        vm.prank(alice.addr);
+//        vm.expectCall(address(glyph), abi.encodeWithSelector(glyph.burnGlyphs.selector, alice.addr, 2));
+//        token.transfer(bob.addr, 2 ether);
+
         vm.prank(alice.addr);
         vm.expectCall(address(glyph), abi.encodeWithSelector(glyph.burnGlyphs.selector, alice.addr, 2));
         token.transfer(bob.addr, 7 ether);

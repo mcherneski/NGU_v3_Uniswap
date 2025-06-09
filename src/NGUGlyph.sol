@@ -161,13 +161,16 @@ contract NGUGlyph is ERC1155Modified, AccessControl {
             uint256 tokensInRange = balanceOf(from, cursor);
             uint256 amountToRemove = tokensInRange;
             unchecked {
-                if (tokensInRange > amount - removedCount) {
+                uint256 remaining = amount - removedCount;
+                if (tokensInRange >= remaining) {
                     amountToRemove = amount - removedCount;
 
                     splitRangeStart = cursor;
                     splitRangeEnd = cursor + amountToRemove - 1;
-                    requeueRangeStart = cursor + amountToRemove;
-                    requeueRangeEnd = cursor + tokensInRange - 1;
+                    if (tokensInRange > remaining) {
+                        requeueRangeStart = cursor + amountToRemove;
+                        requeueRangeEnd = cursor + tokensInRange - 1;
+                    }
                 }
                 removedCount += amountToRemove;
                 queueRangesCount++;
