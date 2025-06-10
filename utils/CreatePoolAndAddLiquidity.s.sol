@@ -47,7 +47,7 @@ contract CreatePoolAndAddLiquidityScript is Script {
         uint256 amount1Max = args.amount1 + 1 wei;
 
         (bytes memory actions, bytes[] memory mintParams) = _mintLiquidityParams(
-            args.poolKey, args.tickLower, args.tickUpper, liquidity, amount0Max, amount1Max, address(this), hookData
+            args.poolKey, args.tickLower, args.tickUpper, liquidity, amount0Max, amount1Max, signer, hookData
         );
 
         // multicall parameters
@@ -58,7 +58,7 @@ contract CreatePoolAndAddLiquidityScript is Script {
 
         // mint liquidity
         params[1] = abi.encodeWithSelector(
-            args.posm.modifyLiquidities.selector, abi.encode(actions, mintParams), block.timestamp + 60
+            args.posm.modifyLiquidities.selector, abi.encode(actions, mintParams), block.timestamp + 1 hours
         );
 
         // if the pool is an ETH pair, native tokens are to be transferred

@@ -36,7 +36,8 @@ contract Deploy is DeployScript, AddressRegistry, CreatePoolAndAddLiquidityScrip
         address positionManager = getAddress("PositionManager");
 
         res.nguGlyph = deployer.deploy_NGUGlyph("NGUGlyph", admin);
-        res.nguToken = deployer.deploy_NGUToken("NGUToken", admin, 1_000 ether, poolManager, address(res.nguGlyph));
+        res.nguToken =
+            deployer.deploy_NGUToken("NGUToken", admin, 1_000_000_000 ether, poolManager, address(res.nguGlyph));
 
         bytes32 hookSalt = _mineHookAddressSalt(poolManager, address(res.nguToken));
         res.hooks = deployer.deploy_UniswapHook(
@@ -63,8 +64,8 @@ contract Deploy is DeployScript, AddressRegistry, CreatePoolAndAddLiquidityScrip
         args.poolKey = poolKey;
         args.tickLower = -600;
         args.tickUpper = 600;
-        args.amount0 = 100 ether;
-        args.amount1 = 100 ether;
+        args.amount0 = 0.1 ether;
+        args.amount1 = 300_000_000 ether;
         _createPoolAndAddLiquidity(admin, args);
     }
 
@@ -74,9 +75,8 @@ contract Deploy is DeployScript, AddressRegistry, CreatePoolAndAddLiquidityScrip
 
         // Mine a salt that will produce a hook address with the correct flags
         bytes memory constructorArgs = abi.encode(poolManager, nguToken);
-        address CREATE2_DEPLOYER = address(0x4e59b44847b379578588920cA78FbF26c0B4956C);
         ( /* address hookAddress */ , salt) =
-            HookMiner.find(CREATE2_DEPLOYER, flags, type(UniswapHook).creationCode, constructorArgs);
+            HookMiner.find(CREATE2_FACTORY, flags, type(UniswapHook).creationCode, constructorArgs);
     }
 
     modifier sync() {

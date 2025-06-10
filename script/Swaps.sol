@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.10;
 
-import "../../src/NGUToken.sol";
-
 import "forge-std/Base.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
-import {AddressRegistry} from "../../utils/AddressRegistry.sol";
+import {AddressRegistry} from "../utils/AddressRegistry.sol";
 import {Commands} from "@uniswap/universal-router/contracts/libraries/Commands.sol";
 import {IV4Router} from "@uniswap/v4-periphery/src/interfaces/IV4Router.sol";
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {UniversalRouter} from "@uniswap/universal-router/contracts/UniversalRouter.sol";
 
-abstract contract Swaps is CommonBase, AddressRegistry {
+abstract contract Swaps is ScriptBase, AddressRegistry {
     UniversalRouter internal router;
 
     constructor() AddressRegistry() {}
@@ -71,7 +69,9 @@ abstract contract Swaps is CommonBase, AddressRegistry {
         uint256 deadline = block.timestamp + 20;
 
         beforeExecute();
-        vm.prank(user);
+
+        bool isScript = vmSafe.isContext(VmSafe.ForgeContext.ScriptGroup);
+        if (!isScript) vm.prank(user);
         router.execute{value: valueToPass}(commands, inputs, deadline);
     }
 }
