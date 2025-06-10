@@ -15,4 +15,8 @@ contract NGUStakedGlyph is ERC1155Modified, Ownable {
     {
         _mintBatch(to, ids, values, data);
     }
+
+    function burnBatch(address from, uint256[] memory ids, uint256[] memory values) external onlyOwner {
+        _burnBatch(from, ids, values);
+    }
 }

@@ -255,6 +255,21 @@ contract NGUGlyph is ERC1155Modified, AccessControl {
         stGlyph.mintBatch(_msgSender(), request.splitRangesStart, splitValues, "");
     }
 
+    /// @notice Unstakes multiple token ranges and adds them to the front of the user's queue in order.
+    /// @param ids Array of token IDs to unstake
+    /// @param amounts Array of amounts to unstake
+    function unStakeGlyphs(uint256[] memory ids, uint256[] memory amounts) external {
+        stGlyph.burnBatch(_msgSender(), ids, amounts);
+        _mintBatch(_msgSender(), ids, amounts, "");
+
+        for (uint256 i = ids.length - 1; i != type(uint256).max;) {
+            _ownerQueue[_msgSender()].pushFront(ids[i]);
+            unchecked {
+                i--;
+            }
+        }
+    }
+
     struct SplitRequest {
         // Queue range glyph IDs to split
         uint256[] queueRanges;
