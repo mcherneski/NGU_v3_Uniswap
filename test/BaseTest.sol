@@ -12,4 +12,6 @@ contract BaseTest is Test {
     function setUp() public virtual {
         admin = address(this);
     }
+
+    receive() external payable {}
 }

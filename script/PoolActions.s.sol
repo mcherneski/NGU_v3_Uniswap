@@ -42,12 +42,10 @@ contract PoolActions is Script, AddressRegistry {
         return uint160(Math.sqrt(amount1 / amount0) * 2 ** 96);
     }
 
-    function createPool(
-        PoolKey memory poolKey,
-        uint256 amount0,
-        uint256 amount1,
-        bytes memory hookData
-    ) internal returns (bytes memory) {
+    function createPool(PoolKey memory poolKey, uint256 amount0, uint256 amount1, bytes memory hookData)
+        internal
+        returns (bytes memory)
+    {
         uint160 startingPrice = calculateSqrtPriceX96(amount0, amount1);
         PositionManager posm; // not sure why the compiler wants variable defined
         return abi.encodeWithSelector(posm.initializePool.selector, poolKey, startingPrice, hookData);
@@ -81,7 +79,8 @@ contract PoolActions is Script, AddressRegistry {
         uint256 amount0Max = amount0 + 1 wei;
         uint256 amount1Max = amount1 + 1 wei;
 
-        bytes memory actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP));
+        bytes memory actions =
+            abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP));
 
         bool isNativeETHPosition = poolKey.currency0.isAddressZero() || poolKey.currency1.isAddressZero();
 
@@ -97,12 +96,10 @@ contract PoolActions is Script, AddressRegistry {
         );
     }
 
-    function removeLiquidity(
-        uint256 tokenId,
-        uint128 amount0Min,
-        uint128 amount1Min,
-        bytes memory hookData
-    ) internal returns (bytes memory) {
+    function removeLiquidity(uint256 tokenId, uint128 amount0Min, uint128 amount1Min, bytes memory hookData)
+        internal
+        returns (bytes memory)
+    {
         bytes memory actions = abi.encodePacked(uint8(Actions.BURN_POSITION));
 
         bytes[] memory params = new bytes[](1);

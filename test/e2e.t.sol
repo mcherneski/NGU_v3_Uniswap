@@ -23,7 +23,8 @@ contract NGUTokenTest_E2E is BaseTest, Swaps {
     function setUp() public override(BaseTest, Swaps) {
         vm.createSelectFork("base-sepolia");
 
-        super.setUp();
+        BaseTest.setUp();
+        Swaps.setUp();
 
         Deploy deploy = new Deploy();
         Deploy.DeployResponse memory response = deploy.deploy(admin);

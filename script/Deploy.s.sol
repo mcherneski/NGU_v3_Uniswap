@@ -26,19 +26,8 @@ contract Deploy is DeployScript, AddressRegistry, PoolActions {
         return deploy(vm.addr(privateKey));
     }
 
-    function deploy(address admin) public sync returns (DeployResponse memory res) {
-        address poolManager = getAddress("PoolManager");
-        address permit2 = getAddress("Permit2");
-        address positionManager = getAddress("PositionManager");
-
-        res.nguGlyph = deployer.deploy_NGUGlyph("NGUGlyph", admin);
-        res.nguToken =
-            deployer.deploy_NGUToken("NGUToken", admin, 1_000_000_000 ether, poolManager, address(res.nguGlyph));
-
-        bytes32 hookSalt = _mineHookAddressSalt(poolManager, address(res.nguToken));
-        res.hooks = deployer.deploy_UniswapHook(
-            "UniswapHook", IPoolManager(poolManager), res.nguToken, DeployOptions({salt: uint256(hookSalt)})
-        );
+    function deploy(address admin) public returns (DeployResponse memory res) {
+        res = _deployContracts(admin);
 
         PoolKey memory poolKey = PoolKey({
             currency0: Currency.wrap(address(0)),
@@ -54,21 +43,22 @@ contract Deploy is DeployScript, AddressRegistry, PoolActions {
         res.nguToken.grantRole(keccak256("COMPTROLLER_ROLE"), address(res.hooks));
         res.nguToken.setPoolParams(poolKey.fee, poolKey.tickSpacing, poolKey.hooks);
 
-        int24 tickLower = -600;
-        int24 tickUpper = 600;
-        uint256 amount0 = 0.1 ether;
-        uint256 amount1 = 300_000_000 ether;
-
-        executePoolActions(
-            poolKey,
-            abi.encode(
-                createPool(poolKey, amount0, amount1, ""),
-                addLiquidity(admin, poolKey, tickLower, tickUpper, amount0, amount1, "")
-            ),
-            amount0
-        );
+        _setupUniswapV4(poolKey, admin);
 
         vm.stopBroadcast();
+    }
+
+    function _deployContracts(address admin) internal returns (DeployResponse memory res) {
+        address poolManager = getAddress("PoolManager");
+
+        res.nguGlyph = deployer.deploy_NGUGlyph("NGUGlyph", admin);
+        res.nguToken =
+            deployer.deploy_NGUToken("NGUToken", admin, 1_000_000_000 ether, poolManager, address(res.nguGlyph));
+
+        bytes32 hookSalt = _mineHookAddressSalt(poolManager, address(res.nguToken));
+        res.hooks = deployer.deploy_UniswapHook(
+            "UniswapHook", IPoolManager(poolManager), res.nguToken, DeployOptions({salt: uint256(hookSalt)})
+        );
     }
 
     function _mineHookAddressSalt(address poolManager, address nguToken) internal view returns (bytes32 salt) {
@@ -79,5 +69,18 @@ contract Deploy is DeployScript, AddressRegistry, PoolActions {
         bytes memory constructorArgs = abi.encode(poolManager, nguToken);
         ( /* address hookAddress */ , salt) =
             HookMiner.find(CREATE2_FACTORY, flags, type(UniswapHook).creationCode, constructorArgs);
+    }
+
+    function _setupUniswapV4(PoolKey memory poolKey, address recipient) internal {
+        int24 tickLower = -600;
+        int24 tickUpper = 600;
+        uint256 amount0 = 0.1 ether;
+        uint256 amount1 = 300_000_000 ether;
+
+        bytes[] memory params = new bytes[](2);
+        params[0] = createPool(poolKey, amount0, amount1, "");
+        params[1] = addLiquidity(recipient, poolKey, tickLower, tickUpper, amount0, amount1, "");
+
+        executePoolActions(poolKey, params, amount0);
     }
 }
