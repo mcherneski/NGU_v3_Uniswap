@@ -10,7 +10,7 @@ import {IPermit2} from "@uniswap/permit2/src/interfaces/IPermit2.sol";
 
 import {Deploy} from "../script/Deploy.s.sol";
 import {GlyphTestHelpers} from "./utils/GlyphTestHelpers.sol";
-import {Swaps} from "./utils/Swaps.sol";
+import {Swaps} from "../script/Swaps.sol";
 import {NGUGlyph} from "../src/NGUGlyph.sol";
 import {NGUToken} from "../src/NGUToken.sol";
 
@@ -23,8 +23,7 @@ contract NGUTokenTest_E2E is BaseTest, Swaps {
     function setUp() public override(BaseTest, Swaps) {
         vm.createSelectFork("base-sepolia");
 
-        BaseTest.setUp();
-        Swaps.setUp();
+        super.setUp();
 
         Deploy deploy = new Deploy();
         Deploy.DeployResponse memory response = deploy.deploy(admin);

@@ -5,18 +5,14 @@ import "forge-deploy/DeployScript.sol";
 import {console} from "forge-std/console.sol";
 import "generated/deployer/DeployerFunctions.g.sol";
 
-import {Actions as UniswapActions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
-import {IPoolInitializer_v4} from "@uniswap/v4-periphery/src/interfaces/IPoolInitializer_v4.sol";
 import {IPoolManager, PoolKey, Currency, IHooks} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
-import {IAllowanceTransfer} from "permit2/src/interfaces/IAllowanceTransfer.sol";
 
-import {CreatePoolAndAddLiquidityScript} from "../utils/CreatePoolAndAddLiquidity.s.sol";
+import {PoolActions} from "./PoolActions.s.sol";
 import {AddressRegistry} from "../utils/AddressRegistry.sol";
 
-contract Deploy is DeployScript, AddressRegistry, CreatePoolAndAddLiquidityScript {
+contract Deploy is DeployScript, AddressRegistry, PoolActions {
     using DeployerFunctions for Deployer;
 
     struct DeployResponse {
@@ -53,20 +49,26 @@ contract Deploy is DeployScript, AddressRegistry, CreatePoolAndAddLiquidityScrip
         });
 
         vm.startBroadcast(admin);
+
         res.nguGlyph.grantRole(keccak256("COMPTROLLER_ROLE"), address(res.nguToken));
         res.nguToken.grantRole(keccak256("COMPTROLLER_ROLE"), address(res.hooks));
         res.nguToken.setPoolParams(poolKey.fee, poolKey.tickSpacing, poolKey.hooks);
-        vm.stopBroadcast();
 
-        CreatePoolAndAddLiquidityScript.Args memory args;
-        args.permit2 = IAllowanceTransfer(permit2);
-        args.posm = IPositionManager(positionManager);
-        args.poolKey = poolKey;
-        args.tickLower = -600;
-        args.tickUpper = 600;
-        args.amount0 = 0.1 ether;
-        args.amount1 = 300_000_000 ether;
-        _createPoolAndAddLiquidity(admin, args);
+        int24 tickLower = -600;
+        int24 tickUpper = 600;
+        uint256 amount0 = 0.1 ether;
+        uint256 amount1 = 300_000_000 ether;
+
+        executePoolActions(
+            poolKey,
+            abi.encode(
+                createPool(poolKey, amount0, amount1, ""),
+                addLiquidity(admin, poolKey, tickLower, tickUpper, amount0, amount1, "")
+            ),
+            amount0
+        );
+
+        vm.stopBroadcast();
     }
 
     function _mineHookAddressSalt(address poolManager, address nguToken) internal view returns (bytes32 salt) {
@@ -77,18 +79,5 @@ contract Deploy is DeployScript, AddressRegistry, CreatePoolAndAddLiquidityScrip
         bytes memory constructorArgs = abi.encode(poolManager, nguToken);
         ( /* address hookAddress */ , salt) =
             HookMiner.find(CREATE2_FACTORY, flags, type(UniswapHook).creationCode, constructorArgs);
-    }
-
-    modifier sync() {
-        _;
-
-        bool isScript = vmSafe.isContext(VmSafe.ForgeContext.ScriptGroup);
-        if (!isScript) return;
-
-        string[] memory command = new string[](2);
-        command[0] = "./forge-deploy";
-        command[1] = "sync";
-        bytes memory output = vmSafe.ffi(command);
-        console.log(string(output));
     }
 }
