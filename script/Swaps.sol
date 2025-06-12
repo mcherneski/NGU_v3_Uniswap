@@ -30,13 +30,15 @@ abstract contract Swaps is ScriptBase, AddressRegistry {
         bytes memory commands = abi.encodePacked(uint8(Commands.V4_SWAP), uint8(Commands.SWEEP));
         bytes[] memory inputs = new bytes[](2);
 
+        bool isBuy = amount > 0;
+
         // Encode V4Router actions
         bytes memory actions =
-            abi.encodePacked(uint8(Actions.SWAP_EXACT_OUT_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
+            abi.encodePacked(uint8(isBuy ? Actions.SWAP_EXACT_OUT_SINGLE : Actions.SWAP_EXACT_IN_SINGLE), uint8(Actions.SETTLE_ALL), uint8(Actions.TAKE_ALL));
 
         // Prepare parameters for each action
         bytes[] memory params = new bytes[](3);
-        if (amount > 0) {
+        if (isBuy) {
             params[0] = abi.encode(
                 IV4Router.ExactOutputSingleParams({
                     poolKey: key,
@@ -46,27 +48,29 @@ abstract contract Swaps is ScriptBase, AddressRegistry {
                     hookData: abi.encode(user)
                 })
             );
+            params[1] = abi.encode(key.currency0, type(uint128).max);
+            params[2] = abi.encode(key.currency1, 0);
         } else {
             params[0] = abi.encode(
                 IV4Router.ExactInputSingleParams({
                     poolKey: key,
                     zeroForOne: false,
-                    amountIn: uint128(amount),
+                    amountIn: uint128(-amount),
                     amountOutMinimum: 0,
                     hookData: abi.encode(user)
                 })
             );
+            params[1] = abi.encode(key.currency1, type(uint128).max);
+            params[2] = abi.encode(key.currency0, 0);
         }
-        params[1] = abi.encode(key.currency0, type(uint128).max);
-        params[2] = abi.encode(key.currency1, 0);
 
         // Combine actions and params into inputs
         inputs[0] = abi.encode(actions, params);
         inputs[1] = abi.encode(key.currency0, user);
 
         // Execute the swap
-        uint256 valueToPass = key.currency0.isAddressZero() ? user.balance : 0;
-        uint256 deadline = block.timestamp + 20;
+        uint256 valueToPass = key.currency0.isAddressZero() && isBuy ? user.balance - 0.001 ether : 0;
+        uint256 deadline = block.timestamp + 2 minutes;
 
         beforeExecute();
 

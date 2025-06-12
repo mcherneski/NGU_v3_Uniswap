@@ -74,7 +74,7 @@ contract Deploy is DeployScript, AddressRegistry, PoolActions {
     function _setupUniswapV4(PoolKey memory poolKey, address recipient) internal {
         int24 tickLower = -600;
         int24 tickUpper = 600;
-        uint256 amount0 = 0.1 ether;
+        uint256 amount0 = 1 ether;
         uint256 amount1 = 300_000_000 ether;
 
         bytes[] memory params = new bytes[](2);

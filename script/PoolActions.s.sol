@@ -38,12 +38,13 @@ contract PoolActions is Script, AddressRegistry {
         posm.multicall{value: value}(params);
     }
 
-    function calculateSqrtPriceX96(uint256 amount0, uint256 amount1) internal returns (uint160) {
+    function calculateSqrtPriceX96(uint256 amount0, uint256 amount1) internal pure returns (uint160) {
         return uint160(Math.sqrt(amount1 / amount0) * 2 ** 96);
     }
 
     function createPool(PoolKey memory poolKey, uint256 amount0, uint256 amount1, bytes memory hookData)
         internal
+        pure
         returns (bytes memory)
     {
         uint160 startingPrice = calculateSqrtPriceX96(amount0, amount1);
@@ -63,7 +64,7 @@ contract PoolActions is Script, AddressRegistry {
         /// @dev amount of token1
         uint256 amount1,
         bytes memory hookData
-    ) internal returns (bytes memory) {
+    ) internal view returns (bytes memory) {
         uint160 startingPrice = calculateSqrtPriceX96(amount0, amount1);
 
         // Converts token amounts to liquidity units
@@ -98,8 +99,20 @@ contract PoolActions is Script, AddressRegistry {
 
     function removeLiquidity(uint256 tokenId, uint128 amount0Min, uint128 amount1Min, bytes memory hookData)
         internal
+        view
         returns (bytes memory)
     {
+        bytes memory actions = abi.encodePacked(uint8(Actions.BURN_POSITION));
+
+        bytes[] memory params = new bytes[](1);
+        params[0] = abi.encode(tokenId, amount0Min, amount1Min, hookData);
+
+        return abi.encodeWithSelector(
+            PositionManager.modifyLiquidities.selector, abi.encode(actions, params), block.timestamp + 1 hours
+        );
+    }
+
+    function burnPosition(uint256 tokenId, uint128 amount0Min, uint128 amount1Min, bytes memory hookData) internal view returns (bytes memory) {
         bytes memory actions = abi.encodePacked(uint8(Actions.BURN_POSITION));
 
         bytes[] memory params = new bytes[](1);
