@@ -132,9 +132,9 @@ contract NGUGlyph is ERC1155Modified, AccessControl {
         } else {
             tokenId = _nextTokenId;
             queue.pushBack(tokenId);
-            _nextTokenId += amount;
         }
 
+        _nextTokenId += amount;
         _mint(to, tokenId, amount, "");
 
         return tokenId;

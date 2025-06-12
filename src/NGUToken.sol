@@ -40,7 +40,7 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
     {
         _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
 
-        _mint(_defaultAdmin, _initialSupply * (10 ** uint256(decimals())));
+        _mint(_defaultAdmin, _initialSupply);
 
         glyph = NGUGlyph(_glyph);
         stGlyph = glyph.stGlyph();
@@ -107,13 +107,6 @@ contract NGUToken is ERC20, SafeCallback, AccessControl {
         require(_msgSender() == address(_poolKey.hooks), "only hooks");
 
         (uint256 amount,) = _canMintGlyphs(user, swapAmount, false);
-        if (amount > 0) glyph.mintGlyphs(user, amount);
-    }
-
-    /// @dev Mints missing glyphs for the user
-    /// @param user The address of the user
-    function _mintMissingGlyphs(address user) internal returns (uint256 amount, uint256 fee) {
-        (amount, fee) = canMintGlyphs(user);
         if (amount > 0) glyph.mintGlyphs(user, amount);
     }
 
